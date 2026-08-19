@@ -1,0 +1,16 @@
+.idea/
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+.env
+*.zip
+
+/servers.json
+/requests.csv
+/run.jsonl
+/validate_run.py
+/Medsien Inc._Software Developer_Take Home Project_Feb'26.pdf
