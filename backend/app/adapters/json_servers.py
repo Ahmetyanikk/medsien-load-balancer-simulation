@@ -7,7 +7,7 @@ from ..domain.errors import DuplicateServerIdError, EmptyServerConfigurationErro
 from ..domain.models import ServerSpec
 
 
-def load_servers(path: Path) -> list[ServerSpec]:
+def _parse_servers_file(path: Path) -> list[ServerSpec]:
     data = json.loads(path.read_text(encoding="utf-8"))
 
     tick_seconds = int(data.get("tick_seconds", 1))
@@ -25,9 +25,22 @@ def load_servers(path: Path) -> list[ServerSpec]:
             mem_mb=int(raw["mem_mb"]),
             rate_limit_per_sec=int(raw["rate_limit_per_sec"]),
         )
+    return list(servers.values())
+
+
+def load_servers(path: Path) -> list[ServerSpec]:
+    """Strict: raises on empty. Used by SimulationService — a simulation cannot run
+    with zero servers configured."""
+    servers = _parse_servers_file(path)
     if not servers:
         raise EmptyServerConfigurationError("servers.json contains no servers")
-    return list(servers.values())
+    return servers
+
+
+def load_servers_allow_empty(path: Path) -> list[ServerSpec]:
+    """Lenient: empty is valid. Used by ServerRepository — CRUD listing/deletion must
+    tolerate zero configured servers (deleting the last server is allowed)."""
+    return _parse_servers_file(path)
 
 
 def to_json_payload(servers: list[ServerSpec], tick_seconds: int = 1) -> dict:

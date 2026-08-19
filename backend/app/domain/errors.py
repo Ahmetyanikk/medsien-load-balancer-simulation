@@ -18,11 +18,23 @@ class DuplicateRequestIdError(DomainError):
     """requests.csv contains two requests with the same request_id."""
 
 
-class EmptyServerConfigurationError(DomainError):
+class ServerNotFoundError(DomainError):
+    """No server exists with the given id (update/delete on an unknown id)."""
+
+
+class InvalidRuntimeConfigurationError(DomainError):
+    """Base for configuration problems that make running a simulation impossible.
+
+    Maps to HTTP 400 as a group: the runtime configuration itself is invalid or
+    empty, not any individual request field.
+    """
+
+
+class EmptyServerConfigurationError(InvalidRuntimeConfigurationError):
     """No servers were configured; a simulation cannot run with zero capacity."""
 
 
-class EmptyRequestConfigurationError(DomainError):
+class EmptyRequestConfigurationError(InvalidRuntimeConfigurationError):
     """requests.csv contains no requests.
 
     SimulationEngine itself treats an empty request list as a trivially valid
@@ -33,16 +45,28 @@ class EmptyRequestConfigurationError(DomainError):
     """
 
 
-class MissingRequestColumnsError(DomainError):
-    """requests.csv is missing one or more required columns (t, request_id, work_units, mem_mb)."""
-
-
-class UnsupportedTickSecondsError(DomainError):
+class UnsupportedTickSecondsError(InvalidRuntimeConfigurationError):
     """servers.json declares a tick_seconds other than 1.
 
     The provided validator hard-requires tick_seconds == 1; we fail fast with a
     clear domain error rather than let an incompatible config reach the engine.
     """
+
+
+class MissingRequestColumnsError(DomainError):
+    """requests.csv is missing one or more required columns (t, request_id, work_units, mem_mb)."""
+
+
+class SimulationAlreadyRunningError(DomainError):
+    """A simulation run is already in progress (non-blocking lock acquisition failed)."""
+
+
+class CorruptTraceError(DomainError):
+    """A persisted run.jsonl could not be parsed back into events."""
+
+
+class SeedSourceMissingError(DomainError):
+    """A required seed source file (servers.json or requests.csv) is missing from provided/."""
 
 
 class SimulationDeadlockError(DomainError):
