@@ -1,0 +1,245 @@
+:root {
+  color-scheme: light;
+  --color-bg: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-border: #d7dde3;
+  --color-text: #1b2530;
+  --color-text-muted: #5b6b7a;
+  --color-primary: #0f6d63;
+  --color-primary-dark: #0b4f48;
+  --color-danger: #b3261e;
+  --color-danger-bg: #fdecea;
+  --focus-ring: #1a73e8;
+  --radius: 8px;
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 16px;
+  --spacing-4: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--spacing-4);
+}
+
+.app-header {
+  margin-bottom: var(--spacing-4);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.app-subtitle {
+  margin: var(--spacing-1) 0 0;
+  color: var(--color-text-muted);
+}
+
+.app-main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-4);
+}
+
+@media (min-width: 900px) {
+  .app-main {
+    grid-template-columns: 1.3fr 1fr;
+    align-items: start;
+  }
+}
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--spacing-3);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-3);
+  flex-wrap: wrap;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+button {
+  font: inherit;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+  cursor: pointer;
+}
+
+button + button {
+  margin-left: var(--spacing-2);
+}
+
+button:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.server-form button[type="button"],
+.panel-header button {
+  background: var(--color-surface);
+  color: var(--color-primary);
+}
+
+.server-form button[type="submit"] {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--spacing-2);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.field {
+  margin-bottom: var(--spacing-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.field label,
+.field-label {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.readonly-id {
+  font-weight: 600;
+}
+
+input[type="text"],
+input[type="number"] {
+  padding: var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font: inherit;
+  max-width: 100%;
+}
+
+.server-form {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+  background: var(--color-bg);
+}
+
+.form-actions {
+  margin-top: var(--spacing-2);
+}
+
+.form-error,
+[role="alert"] {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius);
+  margin: var(--spacing-2) 0;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-2);
+  margin: 0 0 var(--spacing-3);
+}
+
+@media (min-width: 480px) {
+  .summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.summary-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--spacing-2);
+}
+
+.summary-card dt {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--spacing-1);
+}
+
+.summary-card dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.download-link {
+  display: inline-block;
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius);
+  padding: var(--spacing-2) var(--spacing-3);
+}
+
+.download-link:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
