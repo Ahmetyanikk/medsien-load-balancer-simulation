@@ -65,12 +65,19 @@ def test_sample_walkthrough_matches_manual_trace():
     assert (result.total_requests, result.started, result.finished, result.dropped) == (4, 4, 4, 0)
 
 
-def test_every_request_reaches_finished_or_dropped():
+def test_terminal_state_coverage_is_exact():
     result = SimulationEngine().simulate(SAMPLE_SERVERS, SAMPLE_REQUESTS)
     idx = index(result)
+    input_ids = {r.id for r in SAMPLE_REQUESTS}
+    terminal_types = {EventType.FINISHED, EventType.DROPPED}
+
+    # every input request appears, and nothing extra does
+    assert set(idx.keys()) == input_ids
+
     for rid, events in idx.items():
-        terminal = events[-1][1]
-        assert terminal in (EventType.FINISHED, EventType.DROPPED), f"{rid} did not terminate: {events}"
+        terminals = [ev for _, ev, _ in events if ev in terminal_types]
+        assert len(terminals) == 1, f"{rid} has {len(terminals)} terminal events: {events}"
+        assert events[-1][1] in terminal_types, f"{rid}'s last event was not terminal: {events}"
 
 
 def test_no_unknown_event_types_emitted():

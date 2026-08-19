@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..domain.errors import DuplicateServerIdError, EmptyServerConfigurationError
+from ..domain.errors import DuplicateServerIdError, EmptyServerConfigurationError, UnsupportedTickSecondsError
 from ..domain.models import ServerSpec
 
 
 def load_servers(path: Path) -> list[ServerSpec]:
     data = json.loads(path.read_text(encoding="utf-8"))
+
+    tick_seconds = int(data.get("tick_seconds", 1))
+    if tick_seconds != 1:
+        raise UnsupportedTickSecondsError(f"tick_seconds must be 1, got {tick_seconds}")
+
     servers: dict[str, ServerSpec] = {}
     for raw in data.get("servers", []):
         sid = raw["id"]

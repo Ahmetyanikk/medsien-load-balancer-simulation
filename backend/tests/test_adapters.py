@@ -12,6 +12,8 @@ from app.domain.errors import (
     EmptyServerConfigurationError,
     InvalidRequestSpecError,
     InvalidServerSpecError,
+    MissingRequestColumnsError,
+    UnsupportedTickSecondsError,
 )
 
 
@@ -58,6 +60,21 @@ def test_load_requests_negative_mem_raises(tmp_path):
     csv_path = write(tmp_path / "requests.csv", "t,request_id,work_units,mem_mb\n0,r1,10,-1\n")
     with pytest.raises(InvalidRequestSpecError):
         load_requests(csv_path)
+
+
+def test_load_requests_missing_required_column_raises(tmp_path):
+    csv_path = write(tmp_path / "requests.csv", "t,request_id,work_units\n0,r1,10\n")
+    with pytest.raises(MissingRequestColumnsError):
+        load_requests(csv_path)
+
+
+def test_load_requests_returns_sorted_by_arrival_then_id(tmp_path):
+    csv_path = write(
+        tmp_path / "requests.csv",
+        "t,request_id,work_units,mem_mb\n2,rZ,5,10\n0,rB,5,10\n0,rA,5,10\n",
+    )
+    reqs = load_requests(csv_path)
+    assert [r.id for r in reqs] == ["rA", "rB", "rZ"]
 
 
 # ---- servers.json -----------------------------------------------------------
@@ -110,6 +127,15 @@ def test_load_servers_negative_rate_limit_raises(tmp_path):
         '{"tick_seconds":1,"servers":[{"id":"s1","cpu_units_per_tick":10,"mem_mb":100,"rate_limit_per_sec":-1}]}',
     )
     with pytest.raises(InvalidServerSpecError):
+        load_servers(path)
+
+
+def test_load_servers_tick_seconds_other_than_one_raises(tmp_path):
+    path = write(
+        tmp_path / "servers.json",
+        '{"tick_seconds":2,"servers":[{"id":"s1","cpu_units_per_tick":10,"mem_mb":100,"rate_limit_per_sec":1}]}',
+    )
+    with pytest.raises(UnsupportedTickSecondsError):
         load_servers(path)
 
 

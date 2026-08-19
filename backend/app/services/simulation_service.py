@@ -9,6 +9,7 @@ from ..adapters.csv_requests import load_requests
 from ..adapters.json_servers import load_servers
 from ..adapters.jsonl_trace import JsonlTraceWriter
 from ..domain.engine import SimulationEngine
+from ..domain.errors import EmptyRequestConfigurationError
 from ..domain.models import SimulationResult
 from ..domain.strategies import SchedulingStrategy
 
@@ -35,6 +36,11 @@ class SimulationService:
     ) -> SimulationResult:
         servers = load_servers(servers_path)
         requests = load_requests(requests_path)
+        if not requests:
+            raise EmptyRequestConfigurationError(
+                f"{requests_path} contains no requests; refusing to publish an empty "
+                "run.jsonl (the supplied validator cannot parse zero events)"
+            )
         result = self._engine.simulate(servers, requests, strategy)
         text = self._writer.serialize(result.events)
         self._publish(output_path, text)
