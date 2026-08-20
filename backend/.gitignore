@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+
+# Runtime-seeded config (copied from provided/ on first boot by seed_if_missing —
+# see D-014). data/run.jsonl is intentionally NOT listed here: it is a
+# committed, tracked Day 1 artifact, not a runtime-generated file.
+data/servers.json
+data/requests.csv

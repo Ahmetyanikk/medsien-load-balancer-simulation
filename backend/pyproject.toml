@@ -7,13 +7,16 @@ name = "medsien-load-balancer"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-    "pydantic>=2.6",
+    "fastapi>=0.110,<1.0",
+    "uvicorn>=0.29,<1.0",
+    "pydantic>=2.6,<3.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27"]
+# Ceilings are compatibility bounds, not a deterministic lockfile — they just
+# prevent an accidental future major-version upgrade from silently changing
+# behavior. No requirements.txt/Poetry/pip-tools/uv added alongside this.
+dev = ["pytest>=8.0,<10", "httpx>=0.27,<1.0"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
