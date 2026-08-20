@@ -25,6 +25,45 @@ export interface RunSummary {
   max_wait_ticks: number | null;
 }
 
+export interface StrategyInfo {
+  id: string;
+  label: string;
+  default: boolean;
+}
+
+export interface StrategiesResponse {
+  strategies: StrategyInfo[];
+}
+
+export interface ServerMetrics {
+  server_id: string;
+  requests_handled: number;
+  work_units_total: number | null;
+  busy_ticks: number;
+  /** Occupancy/CPU-pressure proxy, not literal CPU utilization. */
+  busy_time_ratio: number | null;
+  cpu_units_per_tick: number | null;
+}
+
+export interface MetricsResponse {
+  context_available: boolean;
+  strategy_used: string | null;
+  total_requests: number;
+  started: number;
+  finished: number;
+  dropped: number;
+  dropped_rate: number | null;
+  duration_ticks: number;
+  throughput_requests_per_tick: number | null;
+  peak_queue_depth: number;
+  avg_queue_depth: number | null;
+  configured_server_count: number | null;
+  idle_configured_server_ids: string[] | null;
+  /** Occupancy/CPU-pressure proxy, not literal CPU utilization. */
+  avg_cluster_busy_ratio: number | null;
+  servers: ServerMetrics[];
+}
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -122,10 +161,19 @@ export function deleteServer(id: string): Promise<void> {
   });
 }
 
-export function runSimulation(): Promise<RunSummary> {
-  return request<RunSummary>("/api/simulations/run", { method: "POST" });
+export function runSimulation(strategy?: string): Promise<RunSummary> {
+  const path = strategy ? `/api/simulations/run?strategy=${encodeURIComponent(strategy)}` : "/api/simulations/run";
+  return request<RunSummary>(path, { method: "POST" });
 }
 
 export function getLatestSimulation(): Promise<RunSummary> {
   return request<RunSummary>("/api/simulations/latest");
+}
+
+export function getStrategies(): Promise<StrategiesResponse> {
+  return request<StrategiesResponse>("/api/simulations/strategies");
+}
+
+export function getLatestMetrics(): Promise<MetricsResponse> {
+  return request<MetricsResponse>("/api/simulations/latest/metrics");
 }

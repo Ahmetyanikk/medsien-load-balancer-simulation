@@ -58,19 +58,19 @@ describe("RunPanel", () => {
 
   it("shows a loading state before the initial fetch resolves", () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     expect(screen.getByText(/loading latest simulation/i)).toBeInTheDocument();
   });
 
   it("treats a 404 on latest as the normal empty state", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse(404, { detail: "no simulation has been run yet" }));
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     expect(await screen.findByText(/no simulation has been run yet/i)).toBeInTheDocument();
   });
 
   it("renders the summary when latest returns 200", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse(200, SUMMARY));
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     expect(await screen.findByText("7")).toBeInTheDocument();
   });
 
@@ -79,7 +79,7 @@ describe("RunPanel", () => {
     const mockedFetch = fetch as unknown as ReturnType<typeof vi.fn>;
     mockedFetch.mockResolvedValueOnce(jsonResponse(404, { detail: "none" })).mockResolvedValueOnce(jsonResponse(200, SUMMARY));
 
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     await screen.findByText(/no simulation has been run yet/i);
 
     await user.click(screen.getByRole("button", { name: /run simulation/i }));
@@ -95,7 +95,7 @@ describe("RunPanel", () => {
     mockedFetch.mockResolvedValueOnce(jsonResponse(404, { detail: "none" }));
     mockedFetch.mockReturnValueOnce(new Promise(() => {}));
 
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     await screen.findByText(/no simulation has been run yet/i);
 
     await user.click(screen.getByRole("button", { name: /run simulation/i }));
@@ -108,7 +108,7 @@ describe("RunPanel", () => {
     const mockedFetch = fetch as unknown as ReturnType<typeof vi.fn>;
     mockedFetch.mockResolvedValueOnce(jsonResponse(404, { detail: "none" })).mockResolvedValueOnce(jsonResponse(200, SUMMARY));
 
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     await screen.findByText(/no simulation has been run yet/i);
     await user.click(screen.getByRole("button", { name: /run simulation/i }));
 
@@ -122,7 +122,7 @@ describe("RunPanel", () => {
       .mockResolvedValueOnce(jsonResponse(200, SUMMARY))
       .mockResolvedValueOnce(jsonResponse(409, { detail: "a simulation is already running" }));
 
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     await screen.findByText("7");
 
     await user.click(screen.getByRole("button", { name: /run simulation/i }));
@@ -138,7 +138,7 @@ describe("RunPanel", () => {
       .mockResolvedValueOnce(jsonResponse(404, { detail: "none" }))
       .mockResolvedValueOnce(jsonResponse(400, { detail: "no servers configured" }));
 
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     await screen.findByText(/no simulation has been run yet/i);
     await user.click(screen.getByRole("button", { name: /run simulation/i }));
 
@@ -152,7 +152,7 @@ describe("RunPanel", () => {
       .mockResolvedValueOnce(jsonResponse(404, { detail: "none" }))
       .mockResolvedValueOnce(jsonResponse(409, { detail: "a simulation is already running" }));
 
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     await screen.findByText(/no simulation has been run yet/i);
     await user.click(screen.getByRole("button", { name: /run simulation/i }));
 
@@ -161,21 +161,21 @@ describe("RunPanel", () => {
 
   it("renders null wait metrics as N/A", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse(200, NULL_SUMMARY));
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     const naValues = await screen.findAllByText("N/A");
     expect(naValues).toHaveLength(4);
   });
 
   it("shows the download link only when a summary exists", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse(404, { detail: "none" }));
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     await screen.findByText(/no simulation has been run yet/i);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("renders the download link with the exact expected href once a summary exists", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse(200, SUMMARY));
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     const link = await screen.findByRole("link", { name: /download/i });
     expect(link).toHaveAttribute("href", "/api/simulations/latest/download");
   });
@@ -188,7 +188,7 @@ describe("RunPanel", () => {
 
     render(
       <StrictMode>
-        <RunPanel />
+        <RunPanel runVersion={0} onRunCompleted={vi.fn()} />
       </StrictMode>,
     );
 
@@ -214,7 +214,49 @@ describe("RunPanel", () => {
   it("disables the run button while the authoritative initial latest request is pending", () => {
     const deferred = createDeferred<Response>();
     (fetch as unknown as ReturnType<typeof vi.fn>).mockReturnValue(deferred.promise);
-    render(<RunPanel />);
+    render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
     expect(screen.getByRole("button", { name: /run simulation/i })).toBeDisabled();
+  });
+
+  it("calls onRunCompleted after a successful run triggered from this panel's own button", async () => {
+    const user = userEvent.setup();
+    const onRunCompleted = vi.fn();
+    const mockedFetch = fetch as unknown as ReturnType<typeof vi.fn>;
+    mockedFetch.mockResolvedValueOnce(jsonResponse(404, { detail: "none" })).mockResolvedValueOnce(jsonResponse(200, SUMMARY));
+
+    render(<RunPanel runVersion={0} onRunCompleted={onRunCompleted} />);
+    await screen.findByText(/no simulation has been run yet/i);
+    await user.click(screen.getByRole("button", { name: /run simulation/i }));
+
+    await waitFor(() => expect(onRunCompleted).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not call onRunCompleted when a run fails", async () => {
+    const user = userEvent.setup();
+    const onRunCompleted = vi.fn();
+    const mockedFetch = fetch as unknown as ReturnType<typeof vi.fn>;
+    mockedFetch
+      .mockResolvedValueOnce(jsonResponse(404, { detail: "none" }))
+      .mockResolvedValueOnce(jsonResponse(409, { detail: "a simulation is already running" }));
+
+    render(<RunPanel runVersion={0} onRunCompleted={onRunCompleted} />);
+    await screen.findByText(/no simulation has been run yet/i);
+    await user.click(screen.getByRole("button", { name: /run simulation/i }));
+
+    await screen.findByRole("alert");
+    expect(onRunCompleted).not.toHaveBeenCalled();
+  });
+
+  it("refetches the latest summary when runVersion changes (a run triggered elsewhere)", async () => {
+    const mockedFetch = fetch as unknown as ReturnType<typeof vi.fn>;
+    mockedFetch.mockResolvedValueOnce(jsonResponse(404, { detail: "none" })).mockResolvedValueOnce(jsonResponse(200, SUMMARY));
+
+    const { rerender } = render(<RunPanel runVersion={0} onRunCompleted={vi.fn()} />);
+    await screen.findByText(/no simulation has been run yet/i);
+
+    rerender(<RunPanel runVersion={1} onRunCompleted={vi.fn()} />);
+
+    expect(await screen.findByText("7")).toBeInTheDocument();
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
   });
 });

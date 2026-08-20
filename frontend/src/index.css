@@ -232,6 +232,43 @@ input[type="number"] {
   color: #fff;
 }
 
+.app-bonus {
+  margin-top: var(--spacing-4);
+}
+
+.app-bonus-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-4);
+}
+
+@media (min-width: 900px) {
+  .app-bonus-grid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.strategy-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-3);
+  flex-wrap: wrap;
+}
+
+select {
+  font: inherit;
+  padding: var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  max-width: 100%;
+}
+
+.metrics-context-note {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

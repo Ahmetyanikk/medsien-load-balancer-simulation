@@ -75,3 +75,27 @@ class SimulationDeadlockError(DomainError):
     Should be unreachable given the engine's can-ever-run prefilter at arrival time;
     raised instead of looping forever if that invariant is ever violated.
     """
+
+
+class UnknownStrategyError(DomainError):
+    """A strategy id was resolved through the registry that isn't registered.
+
+    The HTTP layer already rejects unknown strategy query values via a Literal
+    type (422) before any route body runs, so this should be unreachable from
+    a real request; it exists so the registry itself is defensively correct
+    for any caller (including tests) that resolves a strategy id directly.
+    Deliberately unregistered with api.errors: falling through to the generic
+    DomainError -> 500 handler is the right status for "reached an
+    unreachable state", which is a different failure class than "the caller
+    supplied a bad value" (already handled as 422 upstream).
+    """
+
+
+class RunContextPublicationError(DomainError):
+    """Publishing the run_context.json pending marker failed.
+
+    Raised only for the pending-marker write (the first step of the context
+    publication sequence, before the new run.jsonl trace is published) so the
+    caller can safely refuse to publish a new trace at all rather than risk an
+    old "complete" context surviving to describe it. Maps to a controlled 500.
+    """

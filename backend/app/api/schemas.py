@@ -50,3 +50,46 @@ class RunSummary(BaseModel):
     p50_wait_ticks: Optional[int]
     p95_wait_ticks: Optional[int]
     max_wait_ticks: Optional[int]
+
+
+class StrategyInfo(BaseModel):
+    id: str
+    label: str
+    default: bool
+
+
+class StrategiesResponse(BaseModel):
+    strategies: list[StrategyInfo]
+
+
+class ServerMetricsOut(BaseModel):
+    server_id: str
+    requests_handled: int
+    work_units_total: Optional[int]
+    busy_ticks: int
+    busy_time_ratio: Optional[float] = Field(
+        description="Occupancy/CPU-pressure proxy, not literal CPU utilization: a "
+        "request's final tick can consume less than a full cpu_units_per_tick when "
+        "work_units isn't an exact multiple of it."
+    )
+    cpu_units_per_tick: Optional[int]
+
+
+class MetricsResponse(BaseModel):
+    context_available: bool
+    strategy_used: Optional[str]
+    total_requests: int
+    started: int
+    finished: int
+    dropped: int
+    dropped_rate: Optional[float]
+    duration_ticks: int
+    throughput_requests_per_tick: Optional[float]
+    peak_queue_depth: int
+    avg_queue_depth: Optional[float]
+    configured_server_count: Optional[int]
+    idle_configured_server_ids: Optional[list[str]]
+    avg_cluster_busy_ratio: Optional[float] = Field(
+        description="Occupancy/CPU-pressure proxy, not literal CPU utilization."
+    )
+    servers: list[ServerMetricsOut]

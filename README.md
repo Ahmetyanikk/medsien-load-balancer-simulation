@@ -14,6 +14,20 @@ passes the assignment's supplied validator.
 - `run.jsonl` trace download
 - Fully Dockerized: `docker compose up --build` is the only required step
 
+## Bonus features (Day 3A)
+
+- A second, validator-compatible scheduling strategy (`lowest_id`), selectable
+  alongside the default (`fastest_finish`) via the dashboard's "Scheduling
+  strategy" panel or `POST /api/simulations/run?strategy=...`
+- Performance metrics (queue depth, throughput, per-server busy time, and —
+  when available — configured-server and strategy context) via the
+  dashboard's "Performance metrics" panel or `GET /api/simulations/latest/metrics`
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §25–27 for exact formulas
+and the `run_context.json` publication design. Event/timeline visualization,
+auto-scaling, and shared-CPU execution remain unimplemented (Day 3B, out of
+scope for this submission).
+
 ## Prerequisites
 
 Docker with Docker Compose (Compose v2 CLI, i.e. `docker compose`, not the
@@ -50,9 +64,26 @@ actually stored.
 
 **Simulation** — the right panel shows the most recent run's summary on load
 (or "No simulation has been run yet" if none exists). Click "Run simulation"
-to trigger a new run against the currently configured servers; the button is
-disabled while a run is in progress. Once a summary exists, "Download
-run.jsonl" downloads the trace directly.
+to trigger a new run (using the default `fastest_finish` strategy) against
+the currently configured servers; the button is disabled while a run is in
+progress. Once a summary exists, "Download run.jsonl" downloads the trace
+directly.
+
+**Scheduling strategy** *(bonus)* — pick `fastest_finish` (default) or
+`lowest_id` and click "Run with selected strategy" to trigger a run using
+that strategy specifically. A successful run here refreshes both the
+Simulation panel and the Performance metrics panel automatically.
+
+**Performance metrics** *(bonus)* — trace-derived totals (queue depth,
+throughput, dropped rate) and a per-server table (requests handled, busy
+ticks, busy ratio) refresh after every run, from either panel above, and are
+always shown regardless of context availability. Which strategy ran, each
+server's `cpu_units_per_tick`, idle configured servers, and the cluster-wide
+busy ratio appear only once a `run_context.json` sidecar has been published
+for the current trace; until then (e.g. immediately after a fresh clone,
+before any run has happened yet) the panel still shows the trace-only totals
+and per-server rows, with an explicit note that configured-server and
+strategy enrichment isn't available yet.
 
 ## Downloading `run.jsonl` outside the dashboard
 
@@ -127,10 +158,14 @@ never touched by this process either way.
   lost-update protection on server CRUD and the concurrent-run protection —
   so the backend intentionally always runs with `--workers 1`, not just by
   default.
+- `ServerMetrics.work_units_total` (bonus metrics) is always `null` — the
+  `run_context.json` snapshot stores servers, not the original per-request
+  `work_units`, and that value isn't exactly recoverable from
+  `(busy_ticks, cpu_units_per_tick)` alone. See
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §26.
 - Out of scope for this submission: authentication/authorization, a database,
-  multi-process/multi-node coordination, and all bonus features (performance
-  metrics beyond the mandatory summary, event/timeline visualization,
-  additional scheduling strategies, auto-scaling, shared-CPU execution mode).
+  multi-process/multi-node coordination, and the remaining bonus features
+  (event/timeline visualization, auto-scaling, shared-CPU execution mode).
 
 ## Architecture
 

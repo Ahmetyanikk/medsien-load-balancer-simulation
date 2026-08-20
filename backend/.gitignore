@@ -8,3 +8,14 @@ __pycache__/
 # committed, tracked Day 1 artifact, not a runtime-generated file.
 data/servers.json
 data/requests.csv
+
+# Bonus (Day 3A) run-context sidecar — optional runtime metadata from the
+# evaluator/artifact perspective (never a required deliverable, never
+# seeded), so it's ignored like the other runtime files above. Its own
+# publication is not uniformly best-effort, though: the pending-marker write
+# is a mandatory prerequisite for publishing a new trace (a failure there
+# aborts the run before any new run.jsonl is written); only the final
+# complete-context write, after the trace has already been published
+# successfully, is best-effort. See docs/ARCHITECTURE.md §27. data/run.jsonl
+# itself remains intentionally NOT listed here.
+data/run_context.json

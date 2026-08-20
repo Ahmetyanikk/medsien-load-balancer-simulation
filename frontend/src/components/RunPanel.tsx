@@ -11,7 +11,17 @@ function formatWait(value: number | null): string {
   return value === null ? "N/A" : String(value);
 }
 
-export default function RunPanel() {
+interface RunPanelProps {
+  /** Monotonic counter App bumps after ANY successful run, whether started
+   * from this panel's own button or from StrategySelector. Refetching on
+   * change keeps this panel in sync with runs triggered elsewhere. */
+  runVersion: number;
+  /** Notify App that this panel's own run succeeded, so sibling panels
+   * (MetricsPanel, StrategySelector) can refresh too. */
+  onRunCompleted: () => void;
+}
+
+export default function RunPanel({ runVersion, onRunCompleted }: RunPanelProps) {
   const [latest, setLatest] = useState<LatestState>({ status: "loading" });
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -52,7 +62,11 @@ export default function RunPanel() {
       // never apply itself.
       generationRef.current += 1;
     };
-  }, [loadLatest]);
+    // runVersion in the dependency array covers both the initial mount fetch
+    // (runVersion's initial value) and every subsequent successful run
+    // triggered anywhere (this panel's own button or StrategySelector) — one
+    // effect, no separate mount-only effect needed.
+  }, [loadLatest, runVersion]);
 
   async function handleRun() {
     const token = ++generationRef.current;
@@ -62,6 +76,7 @@ export default function RunPanel() {
       const summary = await runSimulation();
       if (token === generationRef.current) {
         setLatest({ status: "ready", summary });
+        onRunCompleted();
       }
     } catch (err) {
       if (token === generationRef.current) {

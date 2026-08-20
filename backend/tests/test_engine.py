@@ -3,8 +3,9 @@ from __future__ import annotations
 import pytest
 
 from app.domain.engine import SimulationEngine, _next_tick
-from app.domain.errors import EmptyServerConfigurationError, SimulationDeadlockError
+from app.domain.errors import EmptyServerConfigurationError, SimulationDeadlockError, UnknownStrategyError
 from app.domain.models import EventType, RequestSpec, ServerRuntimeState, ServerSpec
+from app.domain.strategies import FastestFitStrategy, LowestIdStrategy, get_strategy
 
 
 def srv(id_, cpu, mem, rate):
@@ -203,3 +204,53 @@ def test_next_tick_returns_min_of_finish_and_arrival_candidates():
     }
     arrivals = [req("later", 3, 10, 100)]
     assert _next_tick(state, arrivals, arrival_ptr=0, waiting=[]) == 3
+
+
+# ---- second strategy: lowest_id (Day 3A bonus) ---------------------------------
+
+
+def test_default_behavior_unchanged_without_explicit_strategy_argument():
+    result_explicit = SimulationEngine().simulate(SAMPLE_SERVERS, SAMPLE_REQUESTS, FastestFitStrategy())
+    result_default = SimulationEngine().simulate(SAMPLE_SERVERS, SAMPLE_REQUESTS)
+    assert result_explicit.events == result_default.events
+
+
+def test_lowest_id_strategy_genuinely_differs_from_fastest_finish_for_same_input():
+    # sA is slow but lowest id; sZ is fast but highest id.
+    servers = [srv("sA", 1, 1000, 1), srv("sZ", 100, 1000, 1)]
+    requests = [req("r1", 0, 100, 100)]
+
+    fastest = SimulationEngine().simulate(servers, requests, FastestFitStrategy())
+    lowest_id = SimulationEngine().simulate(servers, requests, LowestIdStrategy())
+
+    fastest_server = next(sid for t, ev, sid in index(fastest)["r1"] if ev == EventType.STARTED)
+    lowest_id_server = next(sid for t, ev, sid in index(lowest_id)["r1"] if ev == EventType.STARTED)
+
+    assert fastest_server == "sZ"
+    assert lowest_id_server == "sA"
+    assert fastest_server != lowest_id_server
+
+
+def test_lowest_id_strategy_obeys_the_same_eligibility_rules_as_default():
+    # sA has the lowest id but rate_limit=0 (start-incapable); lowest_id must still skip it.
+    servers = [srv("sA", 100, 1000, 0), srv("sB", 1, 1000, 1)]
+    requests = [req("r1", 0, 10, 100)]
+    result = SimulationEngine().simulate(servers, requests, LowestIdStrategy())
+    started = next(sid for t, ev, sid in index(result)["r1"] if ev == EventType.STARTED)
+    assert started == "sB"
+
+
+def test_lowest_id_strategy_full_sample_walkthrough_stays_lifecycle_correct():
+    result = SimulationEngine().simulate(SAMPLE_SERVERS, SAMPLE_REQUESTS, LowestIdStrategy())
+    idx = index(result)
+    input_ids = {r.id for r in SAMPLE_REQUESTS}
+    assert set(idx.keys()) == input_ids
+    for rid, events in idx.items():
+        assert events[-1][1] in (EventType.FINISHED, EventType.DROPPED)
+
+
+def test_strategy_registry_resolves_known_ids_and_rejects_unknown():
+    assert get_strategy("fastest_finish").name == "fastest_finish"
+    assert get_strategy("lowest_id").name == "lowest_id"
+    with pytest.raises(UnknownStrategyError):
+        get_strategy("not_a_real_strategy")

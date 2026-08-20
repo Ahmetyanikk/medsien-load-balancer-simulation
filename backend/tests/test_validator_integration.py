@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ def test_generated_sample_passes_real_validator(servers_json_path, requests_csv_
         ],
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
     assert proc.returncode == 0, f"validator failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"

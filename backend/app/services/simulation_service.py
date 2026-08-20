@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 import tempfile
 import threading
@@ -12,7 +14,10 @@ from ..adapters.jsonl_trace import JsonlTraceWriter
 from ..domain.engine import SimulationEngine
 from ..domain.errors import EmptyRequestConfigurationError, SimulationAlreadyRunningError
 from ..domain.models import SimulationResult
-from ..domain.strategies import SchedulingStrategy
+from ..domain.strategies import DEFAULT_STRATEGY_NAME, SchedulingStrategy
+from . import run_context
+
+logger = logging.getLogger(__name__)
 
 
 class SimulationService:
@@ -37,7 +42,13 @@ class SimulationService:
         requests_path: Path,
         output_path: Path,
         strategy: Optional[SchedulingStrategy] = None,
+        context_path: Optional[Path] = None,
     ) -> SimulationResult:
+        """context_path is opt-in: omitting it (the default) reproduces the
+        exact pre-Day-3A behavior with no run_context.json touched at all, so
+        every existing caller/test that doesn't pass it is unaffected. The
+        real API route always passes it to enable the bonus metrics context.
+        """
         if not self._lock.acquire(blocking=False):
             raise SimulationAlreadyRunningError("a simulation is already running")
         try:
@@ -50,7 +61,29 @@ class SimulationService:
                 )
             result = self._engine.simulate(servers, requests, strategy)
             text = self._writer.serialize(result.events)
+
+            if context_path is not None:
+                # Step 4: invalidate any previous context before a new trace
+                # exists, so a stale "complete" context can never survive to
+                # (mis)describe it — raises and aborts before publishing a
+                # new trace if this fails.
+                run_context.publish_pending(context_path)
+
+            # Step 5: existing mandatory atomic publication, unchanged.
             self._publish(output_path, text)
+
+            if context_path is not None:
+                # Step 6: best-effort. Must never turn a successful trace
+                # publication into a failed run.
+                strategy_name = strategy.name if strategy is not None else DEFAULT_STRATEGY_NAME
+                trace_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                try:
+                    run_context.publish_complete(
+                        context_path, trace_sha256=trace_sha256, strategy=strategy_name, servers=servers
+                    )
+                except OSError as exc:
+                    logger.warning("failed to publish complete run context (bonus metrics degraded): %s", exc)
+
             return result
         finally:
             self._lock.release()

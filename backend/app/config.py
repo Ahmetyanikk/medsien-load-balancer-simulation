@@ -11,6 +11,7 @@ PROVIDED_DIR = REPO_ROOT / "provided"
 SERVERS_PATH = DATA_DIR / "servers.json"
 REQUESTS_PATH = DATA_DIR / "requests.csv"
 RUN_JSONL_PATH = DATA_DIR / "run.jsonl"
+RUN_CONTEXT_PATH = DATA_DIR / "run_context.json"
 
 
 @dataclass(frozen=True)
@@ -33,3 +34,7 @@ class Settings:
     @property
     def run_jsonl_path(self) -> Path:
         return self.data_dir / "run.jsonl"
+
+    @property
+    def run_context_path(self) -> Path:
+        return self.data_dir / "run_context.json"
