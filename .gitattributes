@@ -1,0 +1,2 @@
+# Keep the generated validator trace byte-stable on every platform.
+backend/data/run.jsonl text eol=lf
