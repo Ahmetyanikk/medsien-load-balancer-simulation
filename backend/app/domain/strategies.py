@@ -67,10 +67,14 @@ DEFAULT_STRATEGY_NAME = FastestFitStrategy.name
 def get_strategy(name: str) -> SchedulingStrategy:
     """Resolve a strategy id through the explicit registry.
 
-    Unknown ids raise UnknownStrategyError rather than silently falling back
-    to the default — the HTTP layer's Literal-typed query parameter is the
-    primary defense against bad input (422 before this is ever reached), this
-    is defense-in-depth for any direct caller.
+    STRATEGY_REGISTRY is the sole source of truth for valid strategy ids.
+    POST /api/simulations/run accepts `strategy` as a plain `str` query
+    parameter (not a Literal-typed enum) and resolves it exclusively through
+    this function; the route catches UnknownStrategyError itself and
+    translates it into a controlled HTTP 422 response. Unknown ids raise
+    UnknownStrategyError rather than silently falling back to the default,
+    so this function stays correct for any direct caller too, not just the
+    HTTP route.
     """
     try:
         return STRATEGY_REGISTRY[name]

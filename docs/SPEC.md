@@ -91,9 +91,9 @@ The implementation must explicitly define:
 - Completion ordering
 - JSON serialization order
 
-## 5. Specification and validator conflict
+## 5. Specification and validator: historical discrepancy and resolution
 
-The assignment execution model says:
+The assignment execution model describes a more general system in which:
 
 - A server may execute multiple requests concurrently.
 - CPU capacity is divided evenly across currently running requests each tick.
@@ -108,13 +108,27 @@ The provided validator instead:
 
 The supplied sample `run.jsonl` also uses non-overlapping server intervals.
 
-### Mandatory compatibility policy
+These two descriptions appeared inconsistent during planning, before any implementation began:
 
-The submitted default mode must pass the unmodified provided validator. It therefore uses at most one active request per server.
+- A trace that actually exercises same-server concurrency cannot pass the supplied validator, since it rejects any overlapping execution interval on the same server.
+- Shared-CPU execution can also produce finish times that differ from the validator's full-CPU closed-form `ceil(work_units / cpu_units_per_tick)` calculation.
+- Demonstrating the PDF's general concurrent-execution behavior therefore conflicts with the supplied validator, even though a serial (non-overlapping) schedule is compatible with both descriptions at the trace level.
 
-This remains compatible with the PDF wording that a server *may* run requests concurrently; the default scheduling strategy intentionally chooses not to overlap them.
+That inconsistency was identified deliberately and recorded here rather than silently resolved one way or the other; the project initially adopted the validator-compatible serial model as its working default pending clarification from Medsien (D-003).
 
-A true shared-CPU mode may be added only as a clearly separated optional strategy after mandatory completion or after clarification from Medsien. It must never replace the validator-compatible default output.
+### Resolution (Medsien Engineering, 2026-08-21)
+
+Medsien Engineering confirmed in writing that:
+
+- The serial, non-overlapping-interval model is the authoritative execution model for this case study.
+- `validate_run.py`, unmodified, is the correctness criterion for this case study.
+- The PDF's concurrency wording describes a more general system and must not override the supplied validator for this assignment.
+- Shared-CPU execution, aggregate concurrent-memory accounting, and per-tick shared-work decrement are not requirements for this case study.
+- The existing engine matches the intended model exactly.
+
+### Final authoritative model
+
+The submitted default mode uses at most one active request per server, computes runtime as `ceil(work_units / cpu_units_per_tick)`, and never overlaps execution intervals on the same server (see `docs/ARCHITECTURE.md` §5–6, `docs/DECISIONS.md` D-003). No implementation change resulted from this clarification — the pre-existing default was already the intended solution. A shared-CPU mode remains unimplemented and is not required; it could only ever be added, if ever, as a clearly separated, non-default optional strategy that never replaces the validator-compatible default output.
 
 ## 6. Server management dashboard
 

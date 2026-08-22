@@ -80,14 +80,14 @@ class SimulationDeadlockError(DomainError):
 class UnknownStrategyError(DomainError):
     """A strategy id was resolved through the registry that isn't registered.
 
-    The HTTP layer already rejects unknown strategy query values via a Literal
-    type (422) before any route body runs, so this should be unreachable from
-    a real request; it exists so the registry itself is defensively correct
-    for any caller (including tests) that resolves a strategy id directly.
-    Deliberately unregistered with api.errors: falling through to the generic
-    DomainError -> 500 handler is the right status for "reached an
-    unreachable state", which is a different failure class than "the caller
-    supplied a bad value" (already handled as 422 upstream).
+    This is a domain-level lookup error with no FastAPI dependency, so it
+    stays usable outside the API layer (e.g. direct/test callers of
+    get_strategy()). The simulation route (routes_simulation.py) catches it
+    explicitly and returns a controlled HTTP 422 with the error's message as
+    the JSON detail — it is deliberately *not* registered with
+    api.errors.register_exception_handlers, since falling through to the
+    generic DomainError -> 500 handler would misrepresent ordinary bad
+    request input as an unreachable-state failure.
     """
 
 

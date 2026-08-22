@@ -28,6 +28,23 @@ and the `run_context.json` publication design. Event/timeline visualization,
 auto-scaling, and shared-CPU execution remain unimplemented (Day 3B, out of
 scope for this submission).
 
+## Execution model
+
+This simulation intentionally runs **one active request per server at a
+time**, using the server's full CPU capacity for that request
+(`ceil_div(work_units, cpu_units_per_tick)` runtime; same-server execution
+intervals never overlap). The supplied `provided/validate_run.py` is the
+authoritative correctness criterion for this case study, and it enforces
+exactly this serial model. Medsien Engineering confirmed in writing
+(2026-08-21) that this is the intended case-study model — the assignment
+PDF's concurrency wording describes a more general system, not a
+requirement here. One consequence: `rate_limit_per_sec` values above 1
+cannot produce multiple simultaneous starts on one server, since a server
+becomes busy the instant it starts a request — this is the confirmed
+intended behavior, not an implementation bug. Full reasoning and the
+resolution are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §5–6 and
+[`docs/DECISIONS.md`](docs/DECISIONS.md) D-003.
+
 ## Prerequisites
 
 Docker with Docker Compose (Compose v2 CLI, i.e. `docker compose`, not the

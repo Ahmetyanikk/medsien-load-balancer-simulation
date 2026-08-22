@@ -77,22 +77,32 @@ A request starting at tick `t` occupies `[start, finish)`. A server may start
 a new request at the exact tick its previous request finishes — `finish_tick`
 of one request and `start_tick` of the next on the same server can be equal.
 
-## 5. PDF vs. validator concurrency conflict
+## 5. Resolved specification discrepancy: PDF vs. validator concurrency
 
 The assignment PDF describes CPU divided evenly across multiple concurrently
 running requests per server. The supplied `validate_run.py` instead rejects
 any overlapping `[start, finish)` interval on the same server and computes
 `finish = start + ceil(work_units / cpu_units_per_tick)` as a closed-form
-check, with no notion of shared CPU. These are incompatible, and the
-validator is the mandatory acceptance gate — see §6.
+check, with no notion of shared CPU. These two descriptions appeared
+incompatible during planning, before implementation began (`docs/SPEC.md`
+§5, `docs/DECISIONS.md` D-003).
+
+Medsien Engineering confirmed in writing (2026-08-21) that the serial,
+non-overlapping model enforced by `validate_run.py` is the authoritative
+execution model for this case study, and that the PDF's concurrency wording
+describes a more general system rather than a requirement here. This is no
+longer an open conflict — see §6.
 
 ## 6. Validator-compatible single-active-request default
 
 The default (and only implemented) mode allows **at most one active request
 per server**. Runtime is `ceil(work_units / cpu_units_per_tick)`;
 `finish_tick = start_tick + runtime`. This is the model the unmodified
-validator enforces and the one the supplied sample trace demonstrates. A
-shared-CPU mode is explicitly out of scope for this submission (D-003).
+validator enforces and the one the supplied sample trace demonstrates.
+Medsien Engineering confirmed (2026-08-21) that this is exactly the intended
+implementation for this case study, not merely a validator-driven
+workaround. A shared-CPU mode remains unimplemented and is not required
+(D-003).
 
 ## 7. Queue order and bypass policy
 

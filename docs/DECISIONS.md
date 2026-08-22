@@ -24,7 +24,7 @@ The simulation engine will have no FastAPI, HTTP, React, or filesystem-persisten
 
 ## D-003: Validator-compatible default execution
 
-**Status:** Accepted pending any clarification from Medsien
+**Status:** Accepted — confirmed authoritative by Medsien Engineering (2026-08-21)
 
 The default submitted mode allows at most one active request per server.
 
@@ -40,7 +40,18 @@ Finish tick is:
 start_tick + runtime
 ```
 
-**Reasoning:** This is the model enforced by the unmodified provided validator and demonstrated by the sample trace.
+**Original reasoning (historical):** This is the model enforced by the unmodified provided validator and demonstrated by the sample trace. During planning, the assignment PDF's shared-CPU wording appeared to conflict with this validator-enforced model (`docs/SPEC.md` §5) — a server dividing CPU evenly across concurrent requests cannot also satisfy the validator's non-overlapping-interval check. The project adopted the serial, non-overlapping model as the working default pending clarification from Medsien, since it is the model the mandatory acceptance check (`validate_run.py`) actually enforces.
+
+**Resolution (Medsien Engineering, 2026-08-21):** Medsien Engineering confirmed in writing that this serial, one-active-request-per-server model is the authoritative execution model for this case study — not a compromise held pending further review. Confirmed explicitly:
+
+- `validate_run.py` is the authoritative correctness criterion for this case study.
+- Each server processes at most one request at a time.
+- A running request receives the server's full CPU capacity.
+- Runtime remains `ceil_div(work_units, cpu_units_per_tick)`; same-server execution intervals must never overlap.
+- The PDF's concurrency wording describes a more general system and is not the required model for this case study.
+- The project's current validator-compatible default is exactly the intended implementation — no further change is required.
+
+This decision is no longer pending. Shared-CPU execution remains unimplemented and out of scope (see D-011).
 
 ## D-004: Queue and drop policy
 
@@ -145,7 +156,7 @@ Use a strategy interface. The first bonus strategies should remain compatible wi
 - Shortest predicted processing time
 - Round robin
 
-A shared-CPU concurrency strategy is a separate experimental mode and cannot become the default without validator clarification.
+A shared-CPU execution mode would be a separate, optional experimental mode rather than another scheduling strategy. It remains unimplemented and is not required by the confirmed authoritative model (D-003).
 
 ## D-012: Auto-scaling scope
 
@@ -314,8 +325,11 @@ succeeded (and can never retroactively undo that success).
 
 ## Open questions
 
-1. Will Medsien evaluate with the supplied serial validator or an updated shared-CPU validator?
-2. Should uploaded request CSV files be retained, or is in-memory use sufficient? (Moot for the mandatory scope — there is no CSV-upload UI; `requests.csv` is seeded once per D-014 and has no CRUD surface.)
-3. ~~Is `docker compose up` expected to generate a sample run automatically, or is a dashboard/API trigger sufficient?~~ Resolved by D-014: startup seeds configuration/request data only, and never auto-runs a simulation. A run is always dashboard/API-triggered.
+- Should uploaded request CSV files be retained, or is in-memory use sufficient? (Moot for the mandatory scope — there is no CSV-upload UI; `requests.csv` is seeded once per D-014 and has no CRUD surface.)
 
-Until clarified, use the simplest behavior that satisfies the PDF and unmodified validator without expanding scope.
+This remaining question does not affect the mandatory submission: it concerns a bonus-adjacent, not-yet-built feature (CSV upload), not any implemented or required behavior.
+
+## Resolved questions
+
+- **Original question 1:** ~~Will Medsien evaluate with the supplied serial validator or an updated shared-CPU validator?~~ Resolved 2026-08-21: Medsien Engineering confirmed in writing that the supplied serial `validate_run.py` is the authoritative correctness criterion for this case study, and that the current validator-compatible implementation is exactly the intended solution. See D-003.
+- **Original question 3:** ~~Is `docker compose up` expected to generate a sample run automatically, or is a dashboard/API trigger sufficient?~~ Resolved by D-014: startup seeds configuration/request data only, and never auto-runs a simulation. A run is always dashboard/API-triggered.
