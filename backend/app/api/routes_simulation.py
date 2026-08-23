@@ -7,14 +7,30 @@ from fastapi.responses import FileResponse
 
 from ..adapters.jsonl_trace import JsonlTraceWriter
 from ..config import Settings
+from ..domain.autoscale import decide_scaling
 from ..domain.errors import CorruptTraceError, UnknownStrategyError
 from ..domain.metrics import compute_metrics
 from ..domain.strategies import STRATEGY_REGISTRY, DEFAULT_STRATEGY_NAME, get_strategy
 from ..domain.summary import SimulationSummary, summarize
-from ..services import run_context
+from ..domain.timeline import compute_timeline
 from ..services.simulation_service import SimulationService
+from ..services.trace_reader import read_current_run
 from .dependencies import get_settings, get_simulation_service
-from .schemas import MetricsResponse, RunSummary, ServerMetricsOut, StrategiesResponse, StrategyInfo
+from .schemas import (
+    AutoScaleObservedOut,
+    AutoScaleResponse,
+    MetricsResponse,
+    QueueDepthPointOut,
+    RunSummary,
+    ServerMetricsOut,
+    StrategiesResponse,
+    StrategyInfo,
+    TimelineEventOut,
+    TimelineIntervalOut,
+    TimelineRequestOut,
+    TimelineResponse,
+    TimelineServerLaneOut,
+)
 
 router = APIRouter(prefix="/api/simulations", tags=["simulations"])
 
@@ -78,29 +94,16 @@ def get_latest(settings: Settings = Depends(get_settings)) -> RunSummary:
 
 @router.get("/latest/metrics", response_model=MetricsResponse)
 def get_latest_metrics(settings: Settings = Depends(get_settings)) -> MetricsResponse:
-    if not settings.run_jsonl_path.exists():
+    snapshot = read_current_run(settings)
+    if snapshot is None:
         raise HTTPException(status_code=404, detail="no simulation has been run yet")
-    # Read raw bytes once and reuse them for both purposes: decoding for
-    # deserialize() and hashing for context verification. read_text() alone
-    # would risk universal-newline translation (CRLF -> LF) silently
-    # changing what gets hashed, which would never match a trace_sha256
-    # computed from the exact persisted bytes.
-    trace_bytes = settings.run_jsonl_path.read_bytes()
-    try:
-        text = trace_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CorruptTraceError(f"persisted trace is not valid UTF-8: {exc}") from exc
-    events = JsonlTraceWriter().deserialize(text)
 
-    context = run_context.load_verified(
-        settings.run_context_path, trace_bytes, known_strategy_ids=frozenset(STRATEGY_REGISTRY)
-    )
-    verified_servers = context["servers"] if context else None
-    cluster, servers = compute_metrics(events, verified_servers)
+    verified_servers = list(snapshot.servers) if snapshot.servers is not None else None
+    cluster, servers = compute_metrics(snapshot.events, verified_servers)
 
     return MetricsResponse(
-        context_available=context is not None,
-        strategy_used=context["strategy"] if context else None,
+        context_available=snapshot.context_available,
+        strategy_used=snapshot.strategy_used,
         total_requests=cluster.total_requests,
         started=cluster.started,
         finished=cluster.finished,
@@ -126,6 +129,98 @@ def get_latest_metrics(settings: Settings = Depends(get_settings)) -> MetricsRes
             )
             for m in servers
         ],
+    )
+
+
+@router.get("/latest/timeline", response_model=TimelineResponse)
+def get_latest_timeline(settings: Settings = Depends(get_settings)) -> TimelineResponse:
+    snapshot = read_current_run(settings)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="no simulation has been run yet")
+
+    verified_servers = list(snapshot.servers) if snapshot.servers is not None else None
+    result = compute_timeline(snapshot.events, verified_servers)
+
+    return TimelineResponse(
+        context_available=result.context_available,
+        strategy_used=snapshot.strategy_used,
+        total_requests=result.total_requests,
+        start_tick=result.start_tick,
+        end_tick=result.end_tick,
+        duration_ticks=result.duration_ticks,
+        requests=[
+            TimelineRequestOut(
+                request_id=r.request_id,
+                arrival_tick=r.arrival_tick,
+                server_id=r.server_id,
+                start_tick=r.start_tick,
+                finish_tick=r.finish_tick,
+                dropped_tick=r.dropped_tick,
+                status=r.status,
+                wait_ticks=r.wait_ticks,
+            )
+            for r in result.requests
+        ],
+        servers=[
+            TimelineServerLaneOut(
+                server_id=lane.server_id,
+                cpu_units_per_tick=lane.cpu_units_per_tick,
+                intervals=[
+                    TimelineIntervalOut(request_id=iv.request_id, start_tick=iv.start_tick, finish_tick=iv.finish_tick)
+                    for iv in lane.intervals
+                ],
+            )
+            for lane in result.servers
+        ],
+        events=[
+            TimelineEventOut(
+                sequence=e.sequence,
+                tick=e.tick,
+                event_type=e.event_type,
+                request_id=e.request_id,
+                server_id=e.server_id,
+            )
+            for e in result.events
+        ],
+        queue_depth=[QueueDepthPointOut(tick=p.tick, depth=p.depth) for p in result.queue_depth],
+    )
+
+
+@router.get("/latest/autoscaling", response_model=AutoScaleResponse)
+def get_latest_autoscaling(settings: Settings = Depends(get_settings)) -> AutoScaleResponse:
+    snapshot = read_current_run(settings)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="no simulation has been run yet")
+
+    verified_servers = list(snapshot.servers) if snapshot.servers is not None else None
+    cluster, _ = compute_metrics(snapshot.events, verified_servers)
+    recommendation = decide_scaling(cluster)
+
+    return AutoScaleResponse(
+        context_available=snapshot.context_available,
+        recommendation_available=recommendation.recommendation_available,
+        action=recommendation.action,
+        reason_codes=list(recommendation.reason_codes),
+        explanation=recommendation.explanation,
+        suggested_server_delta=recommendation.suggested_server_delta,
+        removal_candidate_server_ids=(
+            list(recommendation.removal_candidate_server_ids)
+            if recommendation.removal_candidate_server_ids is not None
+            else None
+        ),
+        observed=AutoScaleObservedOut(
+            total_requests=cluster.total_requests,
+            dropped=cluster.dropped,
+            dropped_rate=cluster.dropped_rate,
+            peak_queue_depth=cluster.peak_queue_depth,
+            avg_queue_depth=cluster.avg_queue_depth,
+            avg_cluster_busy_ratio=cluster.avg_cluster_busy_ratio,
+            configured_server_count=cluster.configured_server_count,
+            idle_configured_server_ids=(
+                list(cluster.idle_configured_server_ids) if cluster.idle_configured_server_ids is not None else None
+            ),
+        ),
+        limitations=list(recommendation.limitations),
     )
 
 

@@ -45,6 +45,98 @@ export interface ServerMetrics {
   cpu_units_per_tick: number | null;
 }
 
+export interface TimelineRequestEntry {
+  request_id: string;
+  arrival_tick: number;
+  server_id: string | null;
+  start_tick: number | null;
+  finish_tick: number | null;
+  dropped_tick: number | null;
+  status: "finished" | "dropped";
+  wait_ticks: number | null;
+}
+
+export interface TimelineInterval {
+  request_id: string;
+  start_tick: number;
+  finish_tick: number;
+}
+
+export interface TimelineServerLane {
+  server_id: string;
+  cpu_units_per_tick: number | null;
+  intervals: TimelineInterval[];
+}
+
+export interface TimelineEventEntry {
+  /** 0-based index in the persisted trace's own event order — not re-sorted. */
+  sequence: number;
+  tick: number;
+  event_type: string;
+  request_id: string;
+  server_id: string | null;
+}
+
+export interface QueueDepthPoint {
+  tick: number;
+  depth: number;
+}
+
+export interface TimelineResponse {
+  context_available: boolean;
+  strategy_used: string | null;
+  total_requests: number;
+  start_tick: number;
+  end_tick: number;
+  duration_ticks: number;
+  requests: TimelineRequestEntry[];
+  servers: TimelineServerLane[];
+  /** Persisted trace order, unsorted — see `sequence` for literal position. */
+  events: TimelineEventEntry[];
+  /** Sparse change points: depth holds constant between consecutive points. */
+  queue_depth: QueueDepthPoint[];
+}
+
+export type AutoScaleAction = "scale_up" | "scale_down" | "no_change";
+
+// Exact mirror of backend/app/domain/autoscale.py's ReasonCode Literal —
+// never renamed once shipped, since tests and the panel key off these
+// strings, not off explanation prose.
+export type AutoScaleReasonCode =
+  | "insufficient_data"
+  | "context_unavailable"
+  | "dropped_requests"
+  | "high_queue_pressure"
+  | "high_occupancy"
+  | "low_occupancy_idle_capacity"
+  | "minimum_server_count"
+  | "steady_state";
+
+export interface AutoScaleObserved {
+  total_requests: number;
+  dropped: number;
+  /** Dropped-request/error-pressure proxy, not a true application error rate. */
+  dropped_rate: number | null;
+  peak_queue_depth: number;
+  avg_queue_depth: number | null;
+  /** Occupancy/CPU-pressure proxy, not literal CPU utilization. */
+  avg_cluster_busy_ratio: number | null;
+  configured_server_count: number | null;
+  idle_configured_server_ids: string[] | null;
+}
+
+export interface AutoScaleResponse {
+  context_available: boolean;
+  recommendation_available: boolean;
+  action: AutoScaleAction | null;
+  reason_codes: AutoScaleReasonCode[];
+  explanation: string;
+  suggested_server_delta: number | null;
+  removal_candidate_server_ids: string[] | null;
+  observed: AutoScaleObserved;
+  limitations: string[];
+}
+
 export interface MetricsResponse {
   context_available: boolean;
   strategy_used: string | null;
@@ -176,4 +268,12 @@ export function getStrategies(): Promise<StrategiesResponse> {
 
 export function getLatestMetrics(): Promise<MetricsResponse> {
   return request<MetricsResponse>("/api/simulations/latest/metrics");
+}
+
+export function getLatestTimeline(): Promise<TimelineResponse> {
+  return request<TimelineResponse>("/api/simulations/latest/timeline");
+}
+
+export function getLatestAutoscaling(): Promise<AutoScaleResponse> {
+  return request<AutoScaleResponse>("/api/simulations/latest/autoscaling");
 }

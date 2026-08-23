@@ -48,17 +48,56 @@ body {
   color: var(--color-text-muted);
 }
 
-.app-main {
+/* Vertical rhythm for the three dashboard rows (primary / analysis / timeline)
+   — one gap mechanism instead of each row managing its own margin-top. */
+.app-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.app-primary-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--spacing-4);
 }
 
+.app-controls-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  min-width: 0;
+}
+
 @media (min-width: 900px) {
-  .app-main {
-    grid-template-columns: 1.3fr 1fr;
+  .app-primary-grid {
+    /* ~3:2 desktop ratio via responsive minmax(), not fixed pixel widths —
+       Servers needs more room than the Simulation/Strategy control stack. */
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     align-items: start;
   }
+}
+
+.app-analysis-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-4);
+}
+
+@media (min-width: 700px) {
+  .app-analysis-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* Grid items default to min-width: auto, which lets wide intrinsic content
+   (a wide table, a wide SVG) force the column — and the page — wider than
+   the viewport. minmax(0, ...) on the tracks above covers the columns
+   themselves; this covers the items placed inside them. */
+.app-primary-grid > *,
+.app-analysis-grid > * {
+  min-width: 0;
 }
 
 .panel {
@@ -232,23 +271,6 @@ input[type="number"] {
   color: #fff;
 }
 
-.app-bonus {
-  margin-top: var(--spacing-4);
-}
-
-.app-bonus-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--spacing-4);
-}
-
-@media (min-width: 900px) {
-  .app-bonus-grid {
-    grid-template-columns: 1fr 1fr;
-    align-items: start;
-  }
-}
-
 .strategy-controls {
   display: flex;
   align-items: flex-end;
@@ -267,6 +289,206 @@ select {
 .metrics-context-note {
   color: var(--color-text-muted);
   font-size: 0.9rem;
+}
+
+.app-timeline {
+  /* Row spacing now comes from .app-content's flex gap. This is a flex-item
+     safety net (same overflow issue as grid's min-width:auto default): the
+     Timeline SVGs' own min-width could otherwise force this row, and the
+     page, wider than the viewport. */
+  min-width: 0;
+}
+
+.timeline-scroll {
+  overflow-x: auto;
+  margin-bottom: var(--spacing-3);
+}
+
+.timeline-svg {
+  display: block;
+  min-width: 720px;
+  width: 100%;
+  height: auto;
+}
+
+.timeline-gridline {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.timeline-axis-label {
+  font-size: 10px;
+  fill: var(--color-text-muted);
+}
+
+.timeline-lane-label {
+  font-size: 11px;
+  fill: var(--color-text);
+}
+
+.timeline-running-rect {
+  fill: var(--color-primary);
+}
+
+.timeline-waiting-rect {
+  fill: var(--color-border);
+}
+
+.timeline-waiting-pattern-bg {
+  fill: var(--color-bg);
+}
+
+.timeline-waiting-pattern-stroke {
+  stroke: var(--color-text-muted);
+}
+
+/* Each marker class is used both on SVG <text> (styled via `fill`) and, for
+   the legend, on a plain HTML <span> (styled via `color`) — `fill` has no
+   effect on ordinary text, so both properties are set to the same value on
+   every one of these classes rather than relying on just one. */
+.timeline-dropped-marker {
+  fill: var(--color-danger);
+  color: var(--color-danger);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.timeline-marker-arrival {
+  fill: var(--color-text);
+  color: var(--color-text);
+  font-size: 8px;
+}
+
+.timeline-marker-start {
+  fill: var(--color-primary-dark);
+  color: var(--color-primary-dark);
+  font-size: 9px;
+}
+
+.timeline-marker-finish {
+  fill: var(--color-text);
+  color: var(--color-text);
+  font-size: 8px;
+}
+
+.timeline-queue-scale-label {
+  font-size: 10px;
+  fill: var(--color-text-muted);
+}
+
+.timeline-queue-path {
+  stroke: var(--color-primary-dark);
+  stroke-width: 2;
+}
+
+.timeline-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-3);
+  padding: 0;
+  margin: 0 0 var(--spacing-3);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  margin-right: var(--spacing-1);
+  vertical-align: middle;
+}
+
+.legend-swatch-waiting {
+  /* Mirrors the lifecycle chart's diagonal-stripe waiting texture (rotate(45deg)
+     pattern) — a genuine texture match, not a plain solid color standing in for it. */
+  background: repeating-linear-gradient(
+    45deg,
+    var(--color-bg),
+    var(--color-bg) 2px,
+    var(--color-text-muted) 2px,
+    var(--color-text-muted) 4px
+  );
+  border: 1px solid var(--color-border);
+}
+
+.legend-swatch-running {
+  background: var(--color-primary);
+}
+
+.legend-glyph {
+  display: inline-block;
+  margin-right: var(--spacing-1);
+  font-weight: 700;
+}
+
+.timeline-event-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-3);
+  align-items: flex-start;
+  margin-bottom: var(--spacing-2);
+}
+
+.timeline-event-filters > .field {
+  margin-bottom: 0;
+}
+
+.timeline-event-type-filters {
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--spacing-1) var(--spacing-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  font-size: 0.85rem;
+}
+
+.autoscale-badge-row {
+  margin: 0 0 var(--spacing-2);
+}
+
+.autoscale-badge {
+  display: inline-block;
+  font-weight: 700;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+}
+
+/* Icon + text together carry meaning — background color is a supplementary
+   cue, never the only signal (WCAG: don't rely on color alone). */
+.autoscale-badge-scale_up {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.autoscale-badge-scale_down {
+  background: var(--color-bg);
+  color: var(--color-primary-dark);
+  border-color: var(--color-primary);
+}
+
+.autoscale-badge-no_change {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+}
+
+.autoscale-badge-unavailable {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.autoscale-limitations {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  padding-left: var(--spacing-4);
+  margin: var(--spacing-2) 0 0;
 }
 
 .sr-only {

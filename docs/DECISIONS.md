@@ -323,6 +323,184 @@ happens **before** the mandatory trace publish (and can abort it), while the
 `complete` write happens **after** the mandatory trace publish has already
 succeeded (and can never retroactively undo that success).
 
+## D-021: Bonus timeline visualization and shared queue-depth extraction (Day 3B-1)
+
+**Status:** Accepted
+
+Adds a pure `domain/timeline.py` (`compute_timeline`) exposed via
+`GET /api/simulations/latest/timeline`: a deterministic, post-run-only
+reconstruction of request lifecycles, per-server execution lanes, the raw
+event feed, and queue depth over time, entirely from the already-validated
+persisted `run.jsonl` trace plus the same optional verified `run_context.json`
+snapshot D-020's metrics already use. Read-only: no filesystem/HTTP
+dependency in the domain layer, and no new writes — Timeline never publishes
+a trace, a context file, or any other artifact.
+
+Two design choices distinguish it from D-020's `compute_metrics()`:
+
+- The raw `events` field preserves the **exact persisted trace order**
+  (each event carries a 0-based `sequence`, its literal position) rather
+  than being re-sorted to any canonical order — a manually edited trace is
+  shown in the order it is actually stored, not silently canonicalized. By
+  contrast, `requests` (sorted `(arrival_tick, request_id)`, D-005's order),
+  `servers`/lanes (sorted `server_id`), and each lane's `intervals` (sorted
+  `(start_tick, request_id)`) **are** sorted, because that ordering is this
+  API's own presentation decision, not a re-statement of the trace itself.
+- Queue depth is extracted into a new shared `domain/queue_depth.py`
+  (`compute_queue_depth`), used identically by both `compute_metrics()` and
+  `compute_timeline()`, so the two can never disagree. It replaces the
+  previous dense per-integer-tick loop with a sparse anchor-tick walk —
+  bounded by the number of ticks with an actual arrival/start/drop delta,
+  plus the two boundary ticks — instead of one entry per integer tick in
+  `[start_tick, end_tick]`. This is behavior-preserving for the input
+  contract this function is ever actually called with: non-empty,
+  lifecycle-complete traces where every arrival is resolved to exactly one
+  terminal event, exactly what `JsonlTraceWriter.deserialize()` already
+  guarantees before either caller (`compute_metrics`, `compute_timeline`) is
+  reached via the API. Under that guarantee, queue depth is always back to
+  zero by `end_tick`, so the old dense loop's inclusive final sample and the
+  new sparse interval-weighted sum agree exactly — an arbitrary sequence with
+  an unresolved arrival is outside this contract and isn't a case either
+  implementation needs to agree on. A direct dense-reference cross-check test
+  (`test_queue_depth.py`) reproduces the old per-integer-tick loop
+  independently and asserts exact equality on lifecycle-complete fixtures,
+  and every pre-existing `test_metrics.py` assertion (including the canonical
+  sample's `peak_queue_depth == 1`, `avg_queue_depth == 0.25`) stays green
+  unmodified.
+
+A new shared `services/trace_reader.py` (`read_current_run` /
+`CurrentRunSnapshot`) extracts the "read trace bytes once, decode,
+deserialize, verify context" sequence that `get_latest_metrics` already had
+inlined — used by the refactored (behavior-preserving) `/latest/metrics` and
+the new `/latest/timeline` route, so a third near-duplicate copy of that
+sequence was never written.
+
+The frontend `TimelinePanel` renders three coordinated SVG views sharing one
+tick→pixel scale: a server-lane Gantt of running intervals; a per-request
+lifecycle strip showing a diagonally-striped waiting segment
+`[arrival,start)` and a solid running segment `[start,finish)` (a texture
+distinction, not a color-only one) plus circle/triangle/square glyph markers
+at the arrival/start/finish ticks and a distinct `×` for a dropped request;
+and a queue-depth step chart with visible `0`/peak numeric scale labels. A
+six-item static legend spells out Arrived/Started/Finished/Dropped/Waiting/
+Running next to each glyph or swatch. Three always-present plain HTML tables
+back this up: a filterable event list (by request ID, server, and event
+type, in the API's own `sequence` order), an unconditional accessible
+requests table that is the real source of truth for assistive technology
+(not a hover-only supplement), and a semantic "Tick / Depth" table listing
+every sparse `queue_depth` point — the same sparse representation as the
+chart, never one row per integer tick. Every SVG has a **fixed intrinsic
+viewBox width**, independent of the trace's largest tick — proportional
+positioning within a bounded canvas, never `width = f(end_tick)` — a
+`role="img"` with a data-derived `aria-label`, and both a `<title>` and a
+`<desc>` explaining what that chart encodes, so a huge or sparse max tick
+compresses features instead of growing the page and no chart's meaning
+depends on a hover tooltip.
+
+**Reasoning:** SPEC §10 lists an event/server timeline and queue-length
+history as a bonus. A post-run-only reconstruction from the already-published
+trace keeps this consistent with D-010/D-018's atomic-publish-then-read
+model — no WebSockets, no live tick streaming, no second persisted artifact.
+Reusing `compute_queue_depth` rather than writing a second inline
+implementation removes the only realistic way Metrics and Timeline could
+ever silently disagree about queue depth. This is a bonus feature only: it
+does not change simulation correctness, the canonical `run.jsonl`, any
+existing endpoint's contract, or any mandatory behavior. Shared-CPU execution
+remains unimplemented and is not required by it (D-003/D-011).
+
+## D-022: Auto-scaling recommendation policy (Day 3B-2)
+
+**Status:** Accepted
+
+Adds a pure `domain/autoscale.py` (`decide_scaling`) exposed via
+`GET /api/simulations/latest/autoscaling`: a deterministic, first-match-wins
+policy over the already-computed `ClusterMetrics` (D-020/§26), recommending
+exactly one of `scale_up`, `scale_down`, or `no_change` — or an explicitly
+distinct **unavailable** state when there isn't enough trustworthy evidence
+to decide at all. It is advisory only: it never mutates `servers.json`, the
+trace, or `run_context.json`, never calls server CRUD, and never triggers a
+run. Applying any suggested change remains a manual, future-run edit through
+the existing server-CRUD surface (D-009).
+
+**Available vs. unavailable, not "no_change" as a stand-in for either.**
+`no_change` means the policy had sufficient information (a real trace and a
+verified server snapshot) and concluded capacity should stay as-is.
+*Unavailable* means the policy lacks that information entirely — either no
+requests were observed (`insufficient_data`) or the configured-server context
+is missing, pending, malformed, or hash-mismatched (`context_unavailable`).
+Conflating the two would misrepresent "we don't know" as a real decision;
+the response carries a separate `recommendation_available` boolean precisely
+so the two can never be confused, and the frontend renders a distinctly
+labeled "Recommendation unavailable" state rather than ever falling back to
+a "No change" badge.
+
+**Precedence — exact order, first match wins:**
+
+1. `total_requests == 0` → unavailable, `insufficient_data`.
+2. `configured_server_count is None` → unavailable, `context_unavailable`.
+   This is checked **before** the drop rule — a deliberate, non-obvious
+   choice: a trace with real drops but no verified context still reports
+   unavailable, never a fabricated `scale_up`, because the alternative would
+   mean the drop signal alone can bypass the same trust requirement every
+   other signal in this policy is held to.
+3. `dropped_rate > 0` → `scale_up` (delta `+1`, `dropped_requests`). In this
+   engine, a drop only ever happens when a request could *never* run on any
+   configured server (D-004) — a strong, self-contained signal. The
+   explanation deliberately does not claim an identical additional server is
+   guaranteed to fix it, since the real cause may be an incompatible
+   capacity profile (e.g. no server has enough memory), not merely an
+   insufficient count.
+4. `peak_queue_depth >= configured_server_count` **and**
+   `avg_cluster_busy_ratio >= 0.80` (both required) → `scale_up` (delta
+   `+1`, `["high_queue_pressure", "high_occupancy"]`). Neither signal alone
+   is sufficient — the canonical sample is high-occupancy (`0.875`) but
+   never queue-constrained (`peak_queue_depth(1) < configured_server_count
+   (2)`), and correctly resolves to `no_change`, not `scale_up`: efficiently
+   busy servers are not by themselves evidence that more capacity is needed.
+5. Zero drops, zero queue, low occupancy (`< 0.20`), more than one
+   configured server, and a non-empty idle-server list → `scale_down` (delta
+   `-1`, `low_occupancy_idle_capacity`), naming the idle server ids —
+   **sorted ascending by `decide_scaling` itself**, never trusted from
+   whatever order the `run_context.json` snapshot happens to preserve — as
+   removal candidates, with the explanation stating the user should choose
+   at most one and that nothing is ever applied automatically.
+6. The same zero-drop/zero-queue/low-occupancy shape at exactly the minimum
+   server count (`1`) → `no_change` (`minimum_server_count`), deliberately
+   **not** requiring a non-empty idle list the way rule 5 does — at the
+   minimum count, "idle" is meaningless, since a lone server that ran every
+   non-dropped request (the only way `dropped_rate` stays `0` with one
+   server) can never itself be idle; requiring it would make this branch
+   permanently unreachable.
+7. Otherwise → `no_change` (`steady_state`).
+
+**Thresholds (`HIGH_BUSY_RATIO = 0.80`, `LOW_BUSY_RATIO = 0.20`,
+`MIN_SERVER_COUNT = 1`)** are documented everywhere (schema, module
+docstring, README, this entry) as simple, explainable, uncalibrated
+heuristic defaults for this case study — never as industry-standard,
+production-calibrated, or empirically derived values, since none of that
+evidence exists for a take-home case study.
+
+**Two policy shapes were considered.** A weighted composite score (summing
+normalized drop-rate/queue-ratio/occupancy signals into one scalar and
+thresholding the scalar) was rejected: the weights themselves would be just
+as uncalibrated as the current thresholds but far less explainable ("why
+0.4 and not 0.6") and far harder to test exhaustively (multi-variable
+boundaries instead of single-condition ones). The accepted layered
+precedence keeps every rule a single, independently justifiable condition,
+each with its own isolated boundary test.
+
+**Reasoning:** SPEC §10 names CPU, queue length, and error rate as
+auto-scaling decision inputs; D-020 already computes trace-only and
+context-enriched versions of exactly those three signals (`dropped_rate` as
+the error-pressure proxy, queue depth, `avg_cluster_busy_ratio` as the
+CPU-pressure proxy). This decision reuses them directly rather than
+recomputing anything, and keeps the module a pure function over already-
+validated data — no filesystem, HTTP, repository, environment, or clock
+access — so it is exhaustively unit-testable and independently explainable,
+matching D-002's engine-purity precedent and D-012's original scope framing
+("analyzes completed-run metrics and recommends... applying a recommendation
+changes future server configuration").
+
 ## Open questions
 
 - Should uploaded request CSV files be retained, or is in-memory use sufficient? (Moot for the mandatory scope — there is no CSV-upload UI; `requests.csv` is seeded once per D-014 and has no CRUD surface.)

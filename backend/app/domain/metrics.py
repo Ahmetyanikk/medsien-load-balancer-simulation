@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-from .errors import CorruptTraceError
+from .queue_depth import compute_queue_depth
 from .models import EventType, ServerSpec, SimulationEvent
 
 
@@ -84,17 +84,11 @@ def compute_metrics(
     per_server_busy: dict[str, int] = {}
     per_server_requests: dict[str, int] = {}
 
-    arrived_per_tick: dict[int, int] = {}
-    started_per_tick: dict[int, int] = {}
-    dropped_per_tick: dict[int, int] = {}
-
     for ev in events:
         if ev.event == EventType.ARRIVED:
             arrived_ticks[ev.request_id] = ev.t
-            arrived_per_tick[ev.t] = arrived_per_tick.get(ev.t, 0) + 1
         elif ev.event == EventType.STARTED:
             started_at[ev.request_id] = (ev.t, ev.server_id)  # type: ignore[assignment]
-            started_per_tick[ev.t] = started_per_tick.get(ev.t, 0) + 1
             per_server_requests[ev.server_id] = per_server_requests.get(ev.server_id, 0) + 1  # type: ignore[index]
         elif ev.event == EventType.FINISHED:
             finished_count += 1
@@ -102,39 +96,19 @@ def compute_metrics(
             per_server_busy[sid] = per_server_busy.get(sid, 0) + (ev.t - start_t)
         elif ev.event == EventType.DROPPED:
             dropped_count += 1
-            dropped_per_tick[ev.t] = dropped_per_tick.get(ev.t, 0) + 1
 
     total_requests = len(arrived_ticks)
     dropped_rate = (dropped_count / total_requests) if total_requests else None
 
-    start_tick = min(ev.t for ev in events)
-    end_tick = max(ev.t for ev in events)
-    duration_ticks = end_tick - start_tick
+    # Queue-depth/duration is delegated to the shared compute_queue_depth()
+    # helper (domain/queue_depth.py) so Metrics and Timeline can never drift —
+    # same formula, same negative-depth invariant, previously inlined here.
+    queue_result = compute_queue_depth(events)
+    duration_ticks = queue_result.duration_ticks
+    peak_depth = queue_result.peak_depth
+    avg_queue_depth = queue_result.avg_depth
 
     throughput_requests_per_tick = (finished_count / duration_ticks) if duration_ticks > 0 else None
-
-    # Queue-depth sweep: depth = previous_depth + ARRIVED - STARTED - DROPPED at
-    # each integer tick in the inclusive [start_tick, end_tick] range; missing
-    # ticks carry the previous depth forward automatically since every counter
-    # defaults to 0. avg_queue_depth divides the summed depths by elapsed
-    # duration_ticks (not by the number of samples) since the final sample is
-    # an instant, not an additional tick of elapsed time.
-    #
-    # A negative running depth is never clamped to zero — it means the event
-    # stream itself is inconsistent (e.g. a STARTED with no matching ARRIVED
-    # ever counted), which is an invariant failure in the supplied trace, not
-    # a normal condition to paper over silently.
-    depth = 0
-    depth_sum = 0
-    peak_depth = 0
-    for t in range(start_tick, end_tick + 1):
-        depth = depth + arrived_per_tick.get(t, 0) - started_per_tick.get(t, 0) - dropped_per_tick.get(t, 0)
-        if depth < 0:
-            raise CorruptTraceError(f"tick {t}: queue depth went negative ({depth}) — inconsistent event stream")
-        depth_sum += depth
-        if depth > peak_depth:
-            peak_depth = depth
-    avg_queue_depth = (depth_sum / duration_ticks) if duration_ticks > 0 else None
 
     if context_available:
         server_ids = [s.id for s in verified_servers]  # type: ignore[union-attr]

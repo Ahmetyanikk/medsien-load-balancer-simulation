@@ -370,10 +370,26 @@ context-enriched performance-metrics module exposed via
 lifecycle that safely enables the context-enriched metrics without ever
 risking a stale or mismatched context being trusted.
 
-**Not implemented (bonus, out of scope for this submission):**
-event/timeline visualization, an auto-scaling module, and a shared-CPU
-execution mode. None of these are referenced anywhere in the running
-application — no dead UI stubs, no half-built routes.
+**Implemented (bonus, Day 3B-1 — §28–29):** a shared `domain/queue_depth.py`
+helper and a typed `services/trace_reader.py` boundary (both behind the
+already-shipped `GET /latest/metrics`, refactored behavior-preservingly);
+a pure, post-run-only timeline reconstruction (`domain/timeline.py`) exposed
+via `GET /latest/timeline`, and its `TimelinePanel` frontend.
+
+**Implemented (bonus, Day 3B-2 — §30):** a pure, read-only auto-scaling
+recommendation module (`domain/autoscale.py`) exposed via
+`GET /latest/autoscaling`, and its `AutoScalePanel` frontend. Recommends
+only — never mutates servers, the trace, or `run_context.json`, and never
+runs a simulation.
+
+**Every PDF-listed bonus is implemented** as of Day 3B-2: interchangeable
+scheduling strategies, performance metrics, timeline visualization, and the
+auto-scaling recommendation. Shared-CPU execution is not one of them — it is
+an unimplemented, optional experimental mode outside the confirmed
+authoritative execution model (D-003/D-011), not a remaining PDF bonus, and
+Medsien Engineering's clarification confirms it is not required. It is not
+referenced anywhere in the running application — no dead UI stubs, no
+half-built routes.
 
 ## 24. Assumptions, trade-offs, and known limitations
 
@@ -616,3 +632,253 @@ prerequisite** for publishing a new trace at all, and its failure aborts the
 run with a controlled 500 before any new `run.jsonl` is written. Only the
 final `complete`-context write (step 6, after the trace has already
 succeeded) is best-effort.
+
+## 28. Bonus: shared queue-depth helper and typed trace-reader (Day 3B-1)
+
+`domain/queue_depth.py` exposes a pure `compute_queue_depth(events) ->
+QueueDepthResult` — the single source of truth for queue-depth arithmetic,
+used identically by `compute_metrics()` (§26) and the new `compute_timeline()`
+(§29) so the two can never drift. Instead of the previous dense
+per-integer-tick loop, it walks only the "anchor" ticks where depth can
+possibly change (any tick with a nonzero arrived/started/dropped count, plus
+the two boundary ticks `start_tick`/`end_tick`, forced in even when they
+carry no such delta — e.g. a tick with only a `FINISHED`). Depth is constant
+between consecutive anchors, so the average is an exact interval-weighted sum
+(`Σ depth_i × (anchor[i+1] − anchor[i]) / duration_ticks`) rather than a
+per-tick accumulation — equivalent to the old dense formula for non-empty,
+lifecycle-complete input (every arrival resolved to exactly one terminal
+event, as `JsonlTraceWriter.deserialize()` already guarantees before either
+caller is reached via the API): depth is always back to zero by `end_tick`
+under that guarantee, so the dense loop's final inclusive sample and this
+function's interval-weighted sum agree exactly, and verified directly by a
+dense-reference cross-check test (`test_queue_depth.py`) that re-implements
+the old per-integer-tick loop independently and asserts exact equality on
+the canonical sample, a non-trivial queued trace, and an all-zero-queue
+trace — all lifecycle-complete. An arbitrary unresolved-arrival sequence is
+outside this supported input contract (`deserialize()` itself would already
+reject it) and is not a case either implementation needs to agree on. The
+negative-depth invariant (§26) is unchanged: a
+negative running depth still raises `CorruptTraceError` rather than being
+silently clamped. The public `points` sequence is sparse by construction —
+always anchored at `start_tick` (even at depth zero), with a further point
+only where the depth actually changes from the previously emitted one — so a
+huge or sparse max tick produces a handful of points, never one per integer
+tick.
+
+`services/trace_reader.py` exposes a typed, frozen `CurrentRunSnapshot`
+(`events`, `context_available`, `strategy_used`, `servers`) and
+`read_current_run(settings) -> Optional[CurrentRunSnapshot]`, extracting the
+"read `run.jsonl` bytes exactly once, decode, `deserialize()`, verify
+`run_context.json` against those same exact bytes" sequence that
+`get_latest_metrics` already had inlined (§26–27) — the exact-byte CRLF
+hashing discipline (§27) is preserved unchanged, just relocated. Returns
+`None` only when the trace file doesn't exist (the route 404s); a malformed
+trace still raises `CorruptTraceError`, left uncaught here, propagating to
+the existing generic `DomainError → 500` handler exactly as before. Both
+`/latest/metrics` (refactored) and the new `/latest/timeline` route call this
+one function instead of each repeating the sequence — a small, justified
+extraction motivated by the duplication actually about to occur, not a
+speculative abstraction (`/latest/download` and `/latest` are unaffected:
+the former needs no context or validation at all, and the latter needs no
+context, only `deserialize()`).
+
+Both extractions are behavior-preserving by construction and by test: every
+pre-existing `test_metrics.py` and `test_api_simulation.py` assertion for
+`/latest/metrics` stays green unmodified.
+
+## 29. Bonus: timeline visualization (Day 3B-1)
+
+`domain/timeline.py` exposes a pure `compute_timeline(events,
+verified_servers=None) -> TimelineResult`, the same purity boundary as
+`compute_metrics()` (§26) — no filesystem or HTTP access. It is called from
+`GET /api/simulations/latest/timeline`, via `trace_reader.read_current_run()`
+(§28), after the persisted trace has already gone through the same
+`JsonlTraceWriter.deserialize()` schema/lifecycle validation `GET /latest`
+and `GET /latest/metrics` use (§18) — never computed from an unvalidated
+trace. It is strictly read-only and post-run-only: no WebSockets, no live
+tick streaming, no second persisted trace format, and no new writes of any
+kind — a run's trace and context are exactly what D-010/D-020 already publish.
+
+**Per-request rows** (`requests`, sorted `(arrival_tick, request_id)`, D-005's
+order): arrival tick, assigned server, start/finish ticks, wait ticks, and
+either `status: "finished"` or `status: "dropped"` with a `dropped_tick` —
+every request is exactly one or the other, guaranteed by `deserialize()`'s
+lifecycle validation before this function ever runs. There is no `waiting`
+status, since timelines are reconstructed only after a run has fully
+terminated. No `work_units` field exists here either, for the same reason
+`ServerMetrics.work_units_total` (§26) is always `null`: it is never
+persisted in the trace or in the context snapshot.
+
+**Per-server lanes** (`servers`, sorted `server_id`; each lane's `intervals`
+sorted `(start_tick, request_id)`): one lane per server observed via a
+`FINISHED` request in trace-only mode (every `STARTED` request is guaranteed
+to eventually `FINISHED` in a valid trace, so this fully captures every
+server that ever ran something), plus every configured server — including
+idle ones with an empty `intervals` list — when `verified_servers` is
+available, the identical idle-visibility rule `compute_metrics()`'s
+`idle_configured_server_ids` already uses (§26).
+
+**Raw events** (`events`): deliberately **not** re-sorted. Each
+`TimelineEvent` carries a `sequence` — its 0-based index in
+`JsonlTraceWriter.deserialize()`'s returned tuple, i.e. its literal position
+in the parsed trace. A manually edited (but still lifecycle-valid) trace is
+shown in the order it is actually stored, not silently reordered to match
+`validate_run.py`'s own internal `(t, event_name)` re-sort — that re-sort is
+the validator's private implementation detail for checking, not a claim
+about canonical display order. Real application-generated traces already
+emit in D-007's canonical phase order, so `sequence` is a no-op there in
+practice.
+
+**Queue depth** (`queue_depth`): `compute_queue_depth()`'s sparse `points`
+(§28), unchanged.
+
+**Frontend** (`TimelinePanel.tsx`): three coordinated inline-SVG views
+sharing one tick→pixel scale function:
+
+- A server-lane Gantt of running intervals only (a server has no concept of
+  "waiting").
+- A per-request lifecycle strip: a diagonally-striped segment
+  `[arrival_tick, start_tick)` for waiting and a solid segment
+  `[start_tick, finish_tick)` for running — a genuine texture distinction,
+  not a color-only one — plus three small glyph markers per finished request
+  (a circle at the arrival tick, a triangle at the start tick, a square at
+  the finish tick) so all four lifecycle positions (arrival, start, finish,
+  dropped) are independently identifiable without relying on rect boundaries
+  alone; a dropped request instead shows a distinct `×` marker and no bars.
+  The static legend spells out all six meanings (Arrived/Started/Finished/
+  Dropped/Waiting/Running) next to each glyph or swatch — never color alone.
+- A queue-depth step chart with visible numeric scale labels (`0` at the
+  baseline and the actual peak depth at the top), plus an unconditionally
+  rendered semantic "Tick / Depth" table listing every sparse `queue_depth`
+  point returned by the API — the same sparse representation, never one row
+  or DOM node per integer tick, so the exact numeric history is available
+  without interpreting SVG geometry.
+
+A filterable event table (by request ID substring, server, and event type)
+renders the `events`/`sequence` field set in the exact order the API returned
+it, and a plain, unconditionally rendered `requests` table is the actual
+accessible fallback — not hover-gated, and not merely a visual duplicate of
+the SVGs. Every `<svg>` has `role="img"`, a data-derived `aria-label`, **and**
+a `<title>` plus a `<desc>` explaining what that specific chart encodes (no
+information exists only in a hover tooltip) — and a **fixed intrinsic viewBox
+width**, independent of the trace's largest tick — proportional positioning
+within a bounded canvas, never `width = f(end_tick)` — wrapped in the same
+`overflow-x: auto` convention `index.css` already uses for tables, so a huge
+or sparse max tick compresses features instead of growing the page or forcing
+one DOM element per integer tick. No charting dependency was added — the
+shape (a handful of rectangles, small glyphs, and a step polyline on a linear
+tick axis) doesn't justify one. The panel follows the same `runVersion`-keyed
+`generationRef` staleness-guard pattern already proven in `RunPanel`/
+`MetricsPanel` (§19) — no new race-protection mechanism was invented.
+
+`GET /latest/timeline` follows the exact same status-code contract as
+`GET /latest/metrics` (§17–18): 404 when no trace exists, a controlled 500
+(the existing generic `DomainError` handler, unchanged) on a corrupt trace,
+200 with `context_available: false` and `strategy_used: null` when context is
+missing/pending/hash-mismatched — trace-derived fields remain fully populated
+either way, exactly like Metrics never hides trace-derived detail just
+because context is unavailable.
+
+## 30. Bonus: auto-scaling recommendation (Day 3B-2)
+
+`domain/autoscale.py` exposes a pure `decide_scaling(metrics: ClusterMetrics)
+-> ScalingRecommendation` — no filesystem, HTTP, repository, environment,
+clock, or global mutable-state access, the same purity boundary as
+`compute_metrics()` (§26) and `compute_timeline()` (§29). It takes the
+already-computed `ClusterMetrics` directly; it never re-parses events, never
+re-derives a metric `compute_metrics()` already produces, and never mutates
+its input. `GET /api/simulations/latest/autoscaling` composes the same
+`trace_reader.read_current_run()` boundary (§28) used by Metrics and
+Timeline: `read_current_run()` → `compute_metrics(snapshot.events,
+snapshot.servers)` → `decide_scaling(cluster)`, each called exactly once.
+This is a recommendation system, not an autoscaler: it never applies its own
+suggestion, never calls server CRUD, never triggers a run, and never touches
+`run_context.json` — the only state it reads is the same `ClusterMetrics`
+Metrics already computes from the same trace.
+
+**First-match-wins precedence** (see `docs/DECISIONS.md` D-022 for the full
+rationale):
+
+1. `total_requests == 0` → recommendation **unavailable**, reason
+   `insufficient_data`.
+2. `configured_server_count is None` (no verified context) →
+   recommendation **unavailable**, reason `context_unavailable`. Checked
+   *before* drops — a trace with real drops but no verified context still
+   reports unavailable, never a fabricated `scale_up`, since queue/occupancy
+   signals need a trusted server count to mean anything and drops alone are
+   not treated as license to skip that requirement.
+3. `dropped_rate > 0` → `scale_up`, delta `+1`, reason `dropped_requests`.
+   The explanation states this may reflect an incompatible capacity profile
+   (e.g. insufficient memory on every server), not merely an insufficient
+   server *count* — adding one identical server is never claimed to be
+   guaranteed to fix it.
+4. `peak_queue_depth >= configured_server_count` **and**
+   `avg_cluster_busy_ratio >= 0.80` (both) → `scale_up`, delta `+1`, reasons
+   `["high_queue_pressure", "high_occupancy"]` in that exact order. Queue
+   pressure alone or high occupancy alone never triggers this rule — this is
+   exactly why the canonical sample (occupancy `0.875`, but
+   `peak_queue_depth(1) < configured_server_count(2)`) is `no_change`, not
+   `scale_up`.
+5. `dropped_rate == 0`, `peak_queue_depth == 0`,
+   `avg_cluster_busy_ratio < 0.20`, `configured_server_count > 1`, and a
+   non-empty `idle_configured_server_ids` → `scale_down`, delta `-1`, reason
+   `low_occupancy_idle_capacity`, `removal_candidate_server_ids` = the idle
+   ids **sorted ascending inside `decide_scaling`** (never trusted from
+   whatever order the context snapshot happens to preserve). The explanation
+   states the user should choose at most one candidate and that nothing is
+   ever applied automatically.
+6. The same low-occupancy shape (`dropped_rate == 0`, `peak_queue_depth ==
+   0`, `avg_cluster_busy_ratio < 0.20`) at `configured_server_count == 1` →
+   `no_change`, reason `minimum_server_count`. This branch does **not**
+   require `idle_configured_server_ids` to be non-empty the way scale-down
+   does: at the minimum server count, "idle" is moot — a lone server that ran
+   every non-dropped request (the only way `dropped_rate` stays `0` with one
+   server) can never itself be idle, so requiring it would make this branch
+   unreachable by construction.
+7. Otherwise → `no_change`, reason `steady_state`.
+
+**Boundary semantics:** `avg_cluster_busy_ratio == 0.80` satisfies the high
+threshold (`>=`); `== 0.20` does **not** satisfy the low threshold (strict
+`<`). `suggested_server_delta` is `+1`/`-1` only for the two scale actions,
+and `null` — never `0` — for both `no_change` and an unavailable
+recommendation. `removal_candidate_server_ids` is non-null only for
+`scale_down`.
+
+**Stable reason codes** (never renamed once shipped — the frontend and tests
+key off these strings, not prose): `insufficient_data`,
+`context_unavailable`, `dropped_requests`, `high_queue_pressure`,
+`high_occupancy`, `low_occupancy_idle_capacity`, `minimum_server_count`,
+`steady_state`. `explanation` is built by joining fixed per-reason-code
+templates — deterministic, never randomly generated, never re-worded per
+call.
+
+**Fixed limitations**, present on every response regardless of
+`recommendation_available`: no `work_units`/memory-demand evidence
+available; `avg_cluster_busy_ratio` is an occupancy/CPU-pressure proxy, not
+literal CPU utilization; `dropped_rate` is a dropped-request/error-pressure
+proxy, not a true application error rate; only a single-step `±1` delta is
+supported, no magnitude model; both thresholds are simple, explainable,
+uncalibrated heuristic defaults for this case study, never described as
+industry-standard or production-calibrated; recommendations are never
+applied automatically.
+
+**Response contract:** `observed.*` fields are populated directly from the
+same `ClusterMetrics` `/latest/metrics` already returns for that trace, so
+the two endpoints can never disagree — no field is independently
+reinterpreted or recomputed. `strategy_used` is deliberately **not** part of
+this response; it was not approved as part of the auto-scaling contract, and
+adding it "for symmetry" with Metrics/Timeline would be scope creep.
+
+**Frontend** (`AutoScalePanel.tsx`) follows the identical `runVersion`-keyed
+`generationRef` staleness-guard pattern already proven in `RunPanel`/
+`MetricsPanel`/`TimelinePanel` (§19) — no new race-protection mechanism was
+invented. It renders an action badge with both an icon and text (never color
+alone), the explanation verbatim, every observed value (`N/A` for null),
+removal candidates only when non-null, the fixed limitations list, and an
+unconditional statement that recommendations are never applied
+automatically — with no Apply button, mutation callback, CRUD request, or
+simulation trigger anywhere in the component. An unavailable recommendation
+is rendered as a distinctly labeled "Recommendation unavailable" state, never
+folded into the "No change" badge — the two are different claims (no
+evidence to decide, vs. a real decision that happens to be "don't change
+anything") and the UI never conflates them.

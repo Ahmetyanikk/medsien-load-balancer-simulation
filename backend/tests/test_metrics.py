@@ -5,6 +5,7 @@ import pytest
 from app.domain.errors import CorruptTraceError
 from app.domain.metrics import compute_metrics
 from app.domain.models import EventType, ServerSpec, SimulationEvent
+from app.domain.queue_depth import compute_queue_depth
 
 
 def ev(t, event, rid, sid=None):
@@ -144,3 +145,28 @@ def test_started_without_a_corresponding_arrived_raises_corrupt_trace_error():
     )
     with pytest.raises(CorruptTraceError):
         compute_metrics(events)
+
+
+# A non-trivial queued trace distinct from SAMPLE_EVENTS: one server, r1
+# occupies it [0,2), r2 arrives at 0 but must wait, starting at 2 and
+# finishing at 4 — exercises a real queue-depth excursion above zero.
+QUEUED_EVENTS = (
+    ev(0, EventType.ARRIVED, "r1"),
+    ev(0, EventType.ARRIVED, "r2"),
+    ev(0, EventType.STARTED, "r1", "s1"),
+    ev(2, EventType.FINISHED, "r1", "s1"),
+    ev(2, EventType.STARTED, "r2", "s1"),
+    ev(4, EventType.FINISHED, "r2", "s1"),
+)
+
+
+@pytest.mark.parametrize(
+    "events",
+    [pytest.param(SAMPLE_EVENTS, id="canonical-sample"), pytest.param(QUEUED_EVENTS, id="non-trivial-queued")],
+)
+def test_compute_metrics_queue_stats_match_shared_queue_depth_helper_exactly(events):
+    cluster, _ = compute_metrics(events)
+    queue_result = compute_queue_depth(events)
+
+    assert cluster.peak_queue_depth == queue_result.peak_depth
+    assert cluster.avg_queue_depth == queue_result.avg_depth

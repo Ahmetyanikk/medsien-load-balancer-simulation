@@ -14,7 +14,7 @@ passes the assignment's supplied validator.
 - `run.jsonl` trace download
 - Fully Dockerized: `docker compose up --build` is the only required step
 
-## Bonus features (Day 3A)
+## Bonus features (Day 3A, Day 3B-1, Day 3B-2)
 
 - A second, validator-compatible scheduling strategy (`lowest_id`), selectable
   alongside the default (`fastest_finish`) via the dashboard's "Scheduling
@@ -22,11 +22,57 @@ passes the assignment's supplied validator.
 - Performance metrics (queue depth, throughput, per-server busy time, and —
   when available — configured-server and strategy context) via the
   dashboard's "Performance metrics" panel or `GET /api/simulations/latest/metrics`
+- A post-run timeline visualization (server execution lanes, per-request
+  waiting/running/dropped lifecycle, queue depth over time, and a filterable
+  event list), reconstructed entirely from the persisted, already-validated
+  trace, via the dashboard's "Timeline" panel or
+  `GET /api/simulations/latest/timeline`
+- A read-only auto-scaling recommendation (`scale_up` / `scale_down` /
+  `no_change`, or an explicitly labeled *unavailable* state) computed purely
+  from the current trace's metrics, via the dashboard's "Auto-scaling
+  recommendation" panel or `GET /api/simulations/latest/autoscaling`
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §25–27 for exact formulas
-and the `run_context.json` publication design. Event/timeline visualization,
-auto-scaling, and shared-CPU execution remain unimplemented (Day 3B, out of
-scope for this submission).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §25–30 for exact formulas,
+the `run_context.json` publication design, the timeline data contract, and
+the auto-scaling policy. Shared-CPU execution remains unimplemented and is
+not required by the confirmed authoritative execution model (D-003).
+
+### Auto-scaling recommendation
+
+`GET /api/simulations/latest/autoscaling` applies a deterministic,
+first-match-wins policy to the current trace's already-computed metrics:
+
+1. No requests observed → **recommendation unavailable** (`insufficient_data`).
+2. No verified configured-server context → **recommendation unavailable**
+   (`context_unavailable`) — this is checked *before* drops, so a trace with
+   real drops but no verified context still reports unavailable, never a
+   scaling decision.
+3. Any dropped request → **scale up** (`dropped_requests`).
+4. Queue depth at or above the server count *and* high cluster occupancy
+   (≥ 0.80) together → **scale up** (`high_queue_pressure` +
+   `high_occupancy`).
+5. Zero drops, zero queue, low occupancy (< 0.20), and an idle configured
+   server, with more than one server configured → **scale down**
+   (`low_occupancy_idle_capacity`), naming the idle server(s) as removal
+   candidates.
+6. The same low-occupancy shape at the minimum server count → **no change**
+   (`minimum_server_count`).
+7. Otherwise → **no change** (`steady_state`) — this is the canonical
+   sample's own result (0.875 occupancy, but queue depth never reached the
+   server count).
+
+An "unavailable" recommendation is distinct from an actual "no change" —
+the panel labels them differently, and the API never fabricates a decision
+without either a real request or a verified server snapshot to reason about.
+Both thresholds (0.80 / 0.20) are simple, explainable, uncalibrated
+heuristic defaults for this case study, not industry standards or
+production-calibrated values. `avg_cluster_busy_ratio` remains an
+occupancy/CPU-pressure proxy and `dropped_rate` a dropped-request/error-
+pressure proxy — never literal CPU utilization or a true application error
+rate. The endpoint is strictly read-only: it never mutates servers, the
+trace, or `run_context.json`, never runs a simulation, and never applies its
+own recommendation — every suggested change is a manual, future-run edit
+through the existing Servers panel.
 
 ## Execution model
 
@@ -101,6 +147,24 @@ for the current trace; until then (e.g. immediately after a fresh clone,
 before any run has happened yet) the panel still shows the trace-only totals
 and per-server rows, with an explicit note that configured-server and
 strategy enrichment isn't available yet.
+
+**Timeline** *(bonus)* — a post-run reconstruction of the most recent trace,
+refreshing after every run from either panel above: a server-lane chart of
+running intervals, a per-request lifecycle strip (waiting, running, or
+dropped), a queue-depth-over-time chart, a filterable event list (by request
+ID, server, and event type), and an always-visible accessible table of every
+request's arrival/wait/start/finish/server/status. Which strategy ran is
+shown only once verified `run_context.json` context is available; the
+charts, filters, and tables themselves are always trace-derived and shown
+regardless of context availability.
+
+**Auto-scaling recommendation** *(bonus)* — refreshes after every run from
+either panel above: an action badge (Scale up / Scale down / No change, or a
+distinctly labeled "Recommendation unavailable"), the deterministic
+explanation, every observed input value (with proxy caveats), removal
+candidates when a scale-down is recommended, and the fixed limitations list.
+There is no Apply button — recommendations are never applied automatically;
+change server configuration for future runs through the Servers panel.
 
 ## Downloading `run.jsonl` outside the dashboard
 
@@ -180,9 +244,13 @@ never touched by this process either way.
   `work_units`, and that value isn't exactly recoverable from
   `(busy_ticks, cpu_units_per_tick)` alone. See
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §26.
-- Out of scope for this submission: authentication/authorization, a database,
-  multi-process/multi-node coordination, and the remaining bonus features
-  (event/timeline visualization, auto-scaling, shared-CPU execution mode).
+- The auto-scaling recommendation only ever suggests a single-step `±1`
+  server change (no magnitude model), has no `work_units`/memory-demand
+  evidence available to it, and uses uncalibrated case-study thresholds
+  (`0.80`/`0.20`) rather than production-derived values. See
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §30.
+- Out of scope for this submission: authentication/authorization, a
+  database, multi-process/multi-node coordination, and shared-CPU execution.
 
 ## Architecture
 

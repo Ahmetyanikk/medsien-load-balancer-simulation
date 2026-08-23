@@ -3,6 +3,8 @@ import ServerList from "./components/ServerList";
 import RunPanel from "./components/RunPanel";
 import StrategySelector from "./components/StrategySelector";
 import MetricsPanel from "./components/MetricsPanel";
+import TimelinePanel from "./components/TimelinePanel";
+import AutoScalePanel from "./components/AutoScalePanel";
 
 export default function App() {
   // Bumped after any successful run, wherever it was started (RunPanel's own
@@ -17,19 +19,22 @@ export default function App() {
         <h1>Medsien Load Balancer Dashboard</h1>
         <p className="app-subtitle">Server configuration and simulation control</p>
       </header>
-      <main className="app-main">
-        <ServerList />
-        <RunPanel runVersion={runVersion} onRunCompleted={handleRunCompleted} />
-      </main>
-      <section className="app-bonus" aria-labelledby="bonus-heading">
-        <h2 id="bonus-heading" className="sr-only">
-          Bonus features
-        </h2>
-        <div className="app-bonus-grid">
-          <StrategySelector onRunCompleted={handleRunCompleted} />
-          <MetricsPanel runVersion={runVersion} />
+      <main className="app-content">
+        <div className="app-primary-grid">
+          <ServerList />
+          <div className="app-controls-stack">
+            <RunPanel runVersion={runVersion} onRunCompleted={handleRunCompleted} />
+            <StrategySelector onRunCompleted={handleRunCompleted} />
+          </div>
         </div>
-      </section>
+        <div className="app-analysis-grid">
+          <MetricsPanel runVersion={runVersion} />
+          <AutoScalePanel runVersion={runVersion} />
+        </div>
+        <div className="app-timeline">
+          <TimelinePanel runVersion={runVersion} />
+        </div>
+      </main>
     </div>
   );
 }
